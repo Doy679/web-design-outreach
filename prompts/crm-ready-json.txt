@@ -1,0 +1,28 @@
+Return ONLY valid JSON using this structure:
+
+{
+  "business_name": "",
+  "website_url": "",
+  "industry": "",
+  "status": "analyzed",
+  "detected_builder": "",
+  "builder_confidence": "",
+  "is_javascript_rendered": false,
+  "website_score": 0,
+  "main_issue": "",
+  "secondary_issues": [],
+  "business_impact": "",
+  "personalized_hook": "",
+  "recommended_offer": "",
+  "cold_email_subject": "",
+  "cold_email_body": "",
+  "outreach_copy_review": "",
+  "copy_score": 0,
+  "copy_improvements": [],
+  "crm_stage": "Needs Review",
+  "qualified": false,
+  "qualification_reason": ""
+}
+
+Qualification rule:
+The code calculates final qualification after analysis. Do not mark a website qualified before it is analyzed.

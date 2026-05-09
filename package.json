@@ -1,0 +1,29 @@
+{
+  "name": "web-design-outreach",
+  "version": "1.0.0",
+  "description": "CLI tool for qualifying provided business websites for web design outreach.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "report": "tsx src/report.ts",
+    "preview": "tsx src/server.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "csv-parse": "^5.5.6",
+    "csv-stringify": "^6.5.2",
+    "dotenv": "^16.4.5",
+    "openai": "^4.56.0",
+    "playwright": "^1.52.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
