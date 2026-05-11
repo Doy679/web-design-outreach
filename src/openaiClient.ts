@@ -62,13 +62,14 @@ export async function generatePersonalizedAnalysis(input: GenerateAnalysisInput)
 export function createFallbackAnalysis(input: GenerateAnalysisInput): AiCrmFields {
   const { lead, scan } = input;
   const mainIssue = getMainIssue(scan);
+  const businessName = scan.businessIdentity.name || lead.business_name || "the business";
   const observation = scan.status === "analyzed"
-    ? scan.issues[0]?.evidence ?? "the homepage could make the next step clearer"
+    ? getClientSafeObservation(scan)
     : scan.error ?? "the website needs manual review before outreach";
   const offer = chooseOffer(scan);
-  const friendlyEmail = buildEmail(lead, observation, "friendly");
-  const directEmail = buildEmail(lead, observation, "direct");
-  const premiumEmail = buildEmail(lead, observation, "premium");
+  const friendlyEmail = buildEmail(lead, scan, businessName, observation, "friendly");
+  const directEmail = buildEmail(lead, scan, businessName, observation, "direct");
+  const premiumEmail = buildEmail(lead, scan, businessName, observation, "premium");
   const emailReviews = {
     friendly: reviewEmail(friendlyEmail, "friendly", scan),
     direct: reviewEmail(directEmail, "direct", scan),
@@ -77,14 +78,17 @@ export function createFallbackAnalysis(input: GenerateAnalysisInput): AiCrmField
   const recommended = recommendEmailVersion(emailReviews);
 
   return {
-    business_name: scan.businessIdentity.name || lead.business_name,
+    business_name: businessName,
     website_url: scan.finalUrl || scan.normalizedUrl || lead.website_url,
     industry: scan.businessIdentity.industry || lead.industry,
     detected_builder: scan.builder.builder,
     builder_confidence: scan.builder.confidence,
     business_name_confidence: scan.businessIdentity.confidence,
+    business_name_source: scan.businessIdentity.source,
     is_javascript_rendered: scan.isJavaScriptRendered,
     overall_score: scan.scoreBreakdown.overall_score,
+    website_quality_score: scan.scoreBreakdown.website_quality_score,
+    score_confidence: scan.scoreBreakdown.score_confidence,
     cta_score: scan.scoreBreakdown.cta_score,
     seo_score: scan.scoreBreakdown.seo_score,
     contact_visibility_score: scan.scoreBreakdown.contact_visibility_score,
@@ -140,12 +144,26 @@ function buildPromptData(input: GenerateAnalysisInput): Record<string, unknown> 
       meta_description: scan.signals.metaDescription,
       visible_word_count: scan.signals.wordCount,
       has_clear_cta: scan.signals.hasClearCta,
+      has_hero_headline: scan.signals.hasHeroHeadline,
+      has_cta_above_fold: scan.signals.hasCtaAboveFold,
       has_phone_visible: scan.signals.hasPhone,
       has_email_visible: scan.signals.hasEmail,
       has_booking_or_contact_button: scan.signals.hasBookingOrContactButton,
+      has_contact_form_or_page: scan.signals.hasContactFormOrPage,
+      has_address_or_location: scan.signals.hasAddressOrLocation,
+      has_menu_services_products: scan.signals.hasMenuServicesProducts,
+      has_online_ordering: scan.signals.hasOnlineOrdering,
+      has_reservations: scan.signals.hasReservations,
+      has_hours: scan.signals.hasHours,
+      has_reviews_or_testimonials: scan.signals.hasReviewsOrTestimonials,
       has_trust_signals: scan.signals.hasTrustSignals,
       has_navigation: scan.signals.hasNavigation,
       old_copyright_year: scan.signals.oldCopyrightYear,
+      h1_text: scan.signals.h1Text,
+      h2_text: scan.signals.h2Text,
+      link_button_text: scan.signals.linkButtonText,
+      navigation_labels: scan.signals.navigationLabels,
+      likely_industry: scan.signals.likelyIndustry,
       generic_phrases: scan.signals.genericPhrases,
       corporate_signals: scan.signals.corporateSignals,
     },
@@ -174,12 +192,13 @@ function normalizeAiFields(raw: Record<string, unknown>, fallback: AiCrmFields, 
 
   return {
     ...fallback,
-    business_name: asString(raw.business_name, fallback.business_name),
+    business_name: normalizeAiBusinessName(raw.business_name, fallback.business_name),
     website_url: asString(raw.website_url, fallback.website_url),
     industry: asString(raw.industry, fallback.industry),
     detected_builder: asString(raw.detected_builder, fallback.detected_builder),
     builder_confidence: asString(raw.builder_confidence, fallback.builder_confidence),
     business_name_confidence: fallback.business_name_confidence,
+    business_name_source: fallback.business_name_source,
     is_javascript_rendered: scan.isJavaScriptRendered,
     main_issue: asString(raw.main_issue, fallback.main_issue),
     business_impact: asString(raw.business_impact, fallback.business_impact),
@@ -235,26 +254,33 @@ function buildBusinessImpact(scan: WebsiteScanResult, lead: LeadRecord): string 
     return "The website could not be fully reviewed automatically, so outreach should wait until a manual review confirms the page is public and relevant.";
   }
 
-  const industryText = lead.industry ? `${lead.industry} visitors` : "website visitors";
-  const impacts = [];
+  const industry = normalizeIndustry(scan.signals.likelyIndustry || lead.industry);
 
-  if (!scan.signals.hasClearCta || !scan.signals.hasBookingOrContactButton) {
-    impacts.push(`make it harder for ${industryText} to know how to contact, book, or request a quote`);
+  if (industry === "restaurant") {
+    return "For a restaurant, unclear menu, contact, ordering, reservation, hours, or location paths can reduce calls, online orders, reservations, visits, and trust from first-time guests.";
   }
 
-  if (scan.signals.weakTitle || scan.signals.weakMetaDescription) {
-    impacts.push("weaken search snippets and first impressions");
+  if (industry === "clinic") {
+    return "For a dental or clinic website, unclear appointment paths, contact details, and trust proof can reduce bookings, calls, and patient confidence.";
   }
 
-  if (!scan.signals.hasPhone && !scan.signals.hasEmail) {
-    impacts.push("reduce quick-response contact options");
+  if (industry === "local_service") {
+    return "For a contractor or service business, unclear services, quote paths, phone visibility, and proof can reduce calls, estimate requests, and project inquiries.";
   }
 
-  if (impacts.length === 0) {
-    impacts.push("create avoidable friction before a visitor becomes a lead");
+  if (industry === "salon") {
+    return "For a salon or spa, unclear booking, service, location, and trust details can reduce appointment requests, calls, and repeat visitor confidence.";
   }
 
-  return `These issues may ${impacts.join(", ")}.`;
+  if (industry === "law") {
+    return "For a legal website, unclear consultation paths and credibility signals can reduce consultation requests and trust from high-intent visitors.";
+  }
+
+  if (industry === "real_estate") {
+    return "For real estate, unclear lead forms, calls, listing paths, and local proof can reduce listing inquiries and buyer or seller conversations.";
+  }
+
+  return "These issues may create avoidable friction before a visitor becomes a lead, especially around trust, clarity, and the next step.";
 }
 
 function buildPersonalizedHook(lead: LeadRecord, observation: string): string {
@@ -264,16 +290,28 @@ function buildPersonalizedHook(lead: LeadRecord, observation: string): string {
   return `I noticed ${ensureSentence(observation)} For a ${industryText}${locationText}, that can make the next step less clear for visitors.`;
 }
 
-function buildEmail(lead: LeadRecord, observation: string, tone: "friendly" | "direct" | "premium"): string {
-  const businessName = lead.business_name || "there";
+function buildEmail(
+  lead: LeadRecord,
+  scan: WebsiteScanResult,
+  businessName: string,
+  observation: string,
+  tone: "friendly" | "direct" | "premium",
+): string {
+  const safeBusinessName = getGreetingName(businessName, scan.finalUrl || scan.normalizedUrl || lead.website_url);
   const industry = lead.industry ? ` ${lead.industry}` : "";
   const location = lead.location ? ` in ${lead.location}` : "";
   const observationSentence = ensureSentence(observation);
+  const lowConfidence = scan.scoreBreakdown.score_confidence === "low";
+  const observationLead = lowConfidence
+    ? `I noticed a few areas on the site that may be worth reviewing, including this signal: ${observationSentence}`
+    : `I noticed ${observationSentence}`;
   const opener = tone === "friendly"
-    ? `Hi ${businessName}, I took a quick look at your website and noticed ${observationSentence}`
+    ? `Hi ${safeBusinessName} team, I took a quick look at your website. ${observationLead}`
     : tone === "direct"
-      ? `Hi ${businessName}, I noticed ${observationSentence}`
-      : `Hi ${businessName}, I reviewed your website and noticed ${observationSentence}`;
+      ? `Hi ${safeBusinessName} team, ${observationLead}`
+      : lowConfidence
+        ? `Hi ${safeBusinessName} team, I reviewed the public website and noticed a few areas that may be worth reviewing, including this signal: ${observationSentence}`
+        : `Hi ${safeBusinessName} team, I reviewed the public website and noticed ${observationSentence}`;
   const value = tone === "premium"
     ? "We help businesses tighten website clarity, trust signals, and conversion paths so more visitors become inquiries."
     : "I help improve homepage clarity and contact flow so more visitors turn into calls or bookings.";
@@ -282,6 +320,42 @@ function buildEmail(lead: LeadRecord, observation: string, tone: "friendly" | "d
     : "Would it be useful if I sent over a few quick ideas?";
 
   return limitWords(`${opener} For a${industry} business${location}, that can make it harder for visitors to know what to do next. ${value} ${cta}`, 120);
+}
+
+function getGreetingName(name: string, websiteUrl: string): string {
+  const trimmed = name.trim();
+  if (trimmed && !looksLikeDomain(trimmed)) return trimmed;
+
+  try {
+    const candidate = /^https?:\/\//i.test(websiteUrl) ? websiteUrl : `https://${websiteUrl}`;
+    const hostname = new URL(candidate).hostname.replace(/^www\./i, "").split(".")[0] ?? "";
+    const humanized = hostname
+      .replace(/[-_]+/g, " ")
+      .replace(/([a-z])(\d)/gi, "$1 $2")
+      .replace(/(\d)([a-z])/gi, "$1 $2")
+      .trim();
+
+    return humanized
+      ? humanized.split(/\s+/).map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`).join(" ")
+      : "there";
+  } catch {
+    return "there";
+  }
+}
+
+function looksLikeDomain(value: string): boolean {
+  return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(value.trim());
+}
+
+function normalizeIndustry(value: string): string {
+  const lower = value.toLowerCase();
+  if (lower.includes("restaurant") || lower.includes("pizza") || lower.includes("cafe")) return "restaurant";
+  if (lower.includes("clinic") || lower.includes("dental") || lower.includes("patient")) return "clinic";
+  if (lower.includes("contractor") || lower.includes("service") || lower.includes("roof") || lower.includes("plumb")) return "local_service";
+  if (lower.includes("salon") || lower.includes("spa")) return "salon";
+  if (lower.includes("law") || lower.includes("legal") || lower.includes("attorney")) return "law";
+  if (lower.includes("real estate") || lower.includes("realtor")) return "real_estate";
+  return value;
 }
 
 function reviewEmail(copy: string, tone: string, scan: WebsiteScanResult): EmailCopyReview {
@@ -338,6 +412,44 @@ function getMainIssue(scan: WebsiteScanResult): string {
   return `${scan.status.replace(/_/g, " ")}: ${scan.error ?? "Manual review needed."}`;
 }
 
+function getClientSafeObservation(scan: WebsiteScanResult): string {
+  const issue = scan.issues.find((item) => item.key !== "manual_review_note");
+
+  if (!issue) {
+    return "the homepage could make the next step clearer";
+  }
+
+  if (issue.key === "missing_cta") {
+    return "the primary ordering, booking, or contact action may not be prominent enough near the top of the page";
+  }
+
+  if (issue.key === "missing_contact_button") {
+    return "the contact or booking path could be easier to find from the first screen";
+  }
+
+  if (issue.key === "missing_menu") {
+    return "the menu path could be easier for first-time visitors to find";
+  }
+
+  if (issue.key === "missing_restaurant_action") {
+    return "the ordering, reservation, or call path could be clearer for ready-to-act visitors";
+  }
+
+  if (issue.key === "missing_phone") {
+    return "the phone contact option was not easy to confirm from the homepage text";
+  }
+
+  if (issue.key === "weak_seo_basics") {
+    return "the page title or search description could be clearer for first impressions";
+  }
+
+  if (issue.key === "missing_trust_signals") {
+    return "reviews or other trust signals could be more visible";
+  }
+
+  return issue.detail || issue.issue;
+}
+
 function normalizeEmailReviews(value: unknown, fallback: Record<string, EmailCopyReview>): Record<string, EmailCopyReview> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return fallback;
   const record = value as Record<string, unknown>;
@@ -368,6 +480,11 @@ function normalizeRecommendedVersion(value: unknown, fallback: "friendly" | "dir
 
 function asString(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function normalizeAiBusinessName(value: unknown, fallback: string): string {
+  const candidate = asString(value, fallback);
+  return looksLikeDomain(candidate) ? fallback : candidate;
 }
 
 function asNumber(value: unknown, fallback: number, min: number, max: number): number {

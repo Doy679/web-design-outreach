@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { analyzeWebsite } from "./analyzeWebsite.js";
 import { readLeads, writeCsvResults, writeJsonResults } from "./csv.js";
 import { createFallbackAnalysis, generatePersonalizedAnalysis } from "./openaiClient.js";
+import { getCsvOutputPath, getInputPath, getJsonOutputPath } from "./runtimePaths.js";
 import { looksLikeCorporateOrLargeBrand } from "./scoring.js";
 import type {
   AiCrmFields,
@@ -16,9 +17,9 @@ import type {
   WebsiteStatus,
 } from "./types.js";
 
-export const defaultInputPath = "data/leads.csv";
-export const defaultJsonOutputPath = "data/results.json";
-export const defaultCsvOutputPath = "data/results.csv";
+export const defaultInputPath = getInputPath();
+export const defaultJsonOutputPath = getJsonOutputPath();
+export const defaultCsvOutputPath = getCsvOutputPath();
 
 export const reviewStatuses: ReviewStatus[] = [
   "Needs Review",
@@ -158,7 +159,7 @@ export function isFullHttpUrl(value: string): boolean {
 export function normalizeLead(lead: LeadRecord): LeadRecord {
   return {
     ...lead,
-    business_name: lead.business_name.trim() || deriveBusinessName(lead.website_url),
+    business_name: lead.business_name.trim(),
     website_url: lead.website_url.trim(),
     industry: lead.industry.trim(),
     location: lead.location.trim(),
@@ -182,6 +183,7 @@ export function normalizeResultRecord(record: Record<string, unknown> | Outreach
   const issues = normalizeIssues(record.issues, record.secondary_issues, record.main_issue);
   const oldScore = getNumber(record.website_score, getNumber(record.overall_score, 0));
   const overall = getNumber(record.overall_score, oldScore);
+  const websiteQuality = getNumber(record.website_quality_score, overall ? 100 - overall : 0);
   const friendly = getString(record.friendly_email, getString(record.cold_email_body, ""));
   const direct = getString(record.direct_email, friendly);
   const premium = getString(record.premium_email, friendly);
@@ -203,9 +205,12 @@ export function normalizeResultRecord(record: Record<string, unknown> | Outreach
     detected_builder: getString(record.detected_builder, "unknown"),
     builder_confidence: getString(record.builder_confidence, "low"),
     business_name_confidence: getString(record.business_name_confidence, "low"),
+    business_name_source: getString(record.business_name_source, "unknown"),
     is_javascript_rendered: getBoolean(record.is_javascript_rendered, false),
     website_score: oldScore,
     overall_score: overall,
+    website_quality_score: websiteQuality,
+    score_confidence: normalizeScoreConfidence(record.score_confidence),
     cta_score: getNumber(record.cta_score, overall),
     seo_score: getNumber(record.seo_score, overall),
     contact_visibility_score: getNumber(record.contact_visibility_score, overall),
@@ -264,9 +269,12 @@ function buildOutreachResult(
     detected_builder: scan.builder.builder || aiFields.detected_builder,
     builder_confidence: scan.builder.confidence || aiFields.builder_confidence,
     business_name_confidence: scan.businessIdentity.confidence || aiFields.business_name_confidence,
+    business_name_source: scan.businessIdentity.source,
     is_javascript_rendered: scan.isJavaScriptRendered,
     website_score: scan.scoreBreakdown.overall_score,
     overall_score: scan.scoreBreakdown.overall_score,
+    website_quality_score: scan.scoreBreakdown.website_quality_score,
+    score_confidence: scan.scoreBreakdown.score_confidence,
     cta_score: scan.scoreBreakdown.cta_score,
     seo_score: scan.scoreBreakdown.seo_score,
     contact_visibility_score: scan.scoreBreakdown.contact_visibility_score,
@@ -308,7 +316,8 @@ function qualifyWebsite(scan: WebsiteScanResult): { qualified: boolean; reason: 
   if (scan.status !== "analyzed") return { qualified: false, reason: `Not qualified because analysis status is ${scan.status}.` };
   if (isReservedPlaceholderDomain(scan.finalUrl || scan.normalizedUrl)) return { qualified: false, reason: "Not qualified because the URL is a reserved placeholder/example domain." };
   if (looksLikeCorporateOrLargeBrand(scan.signals)) return { qualified: false, reason: `Not qualified because the site shows large-brand/corporate signals: ${scan.signals.corporateSignals.join(", ")}.` };
-  if (scan.scoreBreakdown.overall_score < 70) return { qualified: false, reason: `Not qualified because overall score is ${scan.scoreBreakdown.overall_score}, below 70.` };
+  if (scan.scoreBreakdown.score_confidence === "low") return { qualified: false, reason: "Not qualified automatically because score confidence is low; review screenshots manually before outreach." };
+  if (scan.scoreBreakdown.overall_score < 70) return { qualified: false, reason: `Not qualified because redesign opportunity score is ${scan.scoreBreakdown.overall_score}, below 70.` };
   if (!scan.issues.some((issue) => issue.urgency === "High" || issue.urgency === "Medium")) return { qualified: false, reason: "Not qualified because no high or medium urgency redesign issue was found." };
   if (scan.scoreBreakdown.lead_fit_score < 45) return { qualified: false, reason: `Not qualified because lead fit score is ${scan.scoreBreakdown.lead_fit_score}.` };
   if (scan.signals.wordCount < 20) return { qualified: false, reason: "Not qualified because there is not enough visible homepage information." };
@@ -338,16 +347,6 @@ function isReservedPlaceholderDomain(websiteUrl: string): boolean {
   }
 }
 
-function deriveBusinessName(websiteUrl: string): string {
-  try {
-    const candidate = /^https?:\/\//i.test(websiteUrl) ? websiteUrl : `https://${websiteUrl}`;
-    const hostname = new URL(candidate).hostname.replace(/^www\./i, "");
-    return hostname || "Unknown Website";
-  } catch {
-    return "Unknown Website";
-  }
-}
-
 function normalizeReviewStatus(value: unknown, crmStage = "", qualified = false): ReviewStatus {
   if (typeof value === "string" && reviewStatuses.includes(value as ReviewStatus)) return value as ReviewStatus;
   if (crmStage === "Needs Manual Review") return "Needs Manual Review";
@@ -366,6 +365,10 @@ function normalizePriority(value: unknown, score: number): PriorityLevel {
   if (score >= 70) return "High";
   if (score >= 40) return "Medium";
   return "Low";
+}
+
+function normalizeScoreConfidence(value: unknown): OutreachResult["score_confidence"] {
+  return value === "high" || value === "medium" || value === "low" ? value : "low";
 }
 
 function normalizeEmailVersion(value: unknown): "friendly" | "direct" | "premium" {
@@ -415,7 +418,17 @@ function normalizeIssue(value: unknown, index: number): WebsiteIssue {
 }
 
 function normalizeIssueCategory(value: unknown): WebsiteIssue["category"] {
-  return value === "CTA" || value === "SEO" || value === "Contact" || value === "UX" || value === "Trust" || value === "Speed" || value === "Conversion" ? value : "Conversion";
+  return value === "CTA" ||
+    value === "SEO" ||
+    value === "Contact" ||
+    value === "UX" ||
+    value === "Trust" ||
+    value === "Speed" ||
+    value === "Conversion" ||
+    value === "Content" ||
+    value === "Local"
+    ? value
+    : "Conversion";
 }
 
 function normalizeEmailReviews(value: unknown): Record<string, EmailCopyReview> {

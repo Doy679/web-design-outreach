@@ -1,7 +1,7 @@
 import { detectBuilder } from "./detectBuilder.js";
 import { detectBusinessIdentity } from "./identity.js";
 import { captureScreenshots } from "./screenshots.js";
-import { buildScoreBreakdown, extractWebsiteSignals, findWebsiteIssues, scoreWebsiteOpportunity } from "./scoring.js";
+import { buildScoreBreakdown, extractWebsiteSignals, findWebsiteIssues } from "./scoring.js";
 import type {
   BusinessIdentity,
   BuilderDetection,
@@ -21,7 +21,7 @@ interface RenderedPage {
 
 interface BrowserLike {
   close: () => Promise<void>;
-  newPage: () => Promise<PageLike>;
+  newPage: (options?: { viewport?: { width: number; height: number }; userAgent?: string }) => Promise<PageLike>;
 }
 
 interface PageLike {
@@ -36,7 +36,7 @@ interface PageLike {
 
 interface PlaywrightLike {
   chromium: {
-    launch: (options: { headless: boolean }) => Promise<BrowserLike>;
+    launch: (options: { headless: boolean; args?: string[] }) => Promise<BrowserLike>;
   };
 }
 
@@ -109,8 +109,8 @@ async function scanSingleUrl(lead: LeadRecord, normalizedUrl: string): Promise<W
 
     const initialSignals = extractWebsiteSignals(html);
 
-    if (looksJavaScriptRendered(html, initialSignals)) {
-      return scanRenderedFallback(lead, normalizedUrl, response.url || normalizedUrl, html, response.headers, initialSignals);
+    if (shouldUseRenderedAnalysis(html, initialSignals)) {
+      return scanRenderedFallback(lead, normalizedUrl, response.url || normalizedUrl, html, response.headers, response.status);
     }
 
     return await analyzedScan(lead, normalizedUrl, response.url || normalizedUrl, html, response.headers, "", false, response.status);
@@ -125,7 +125,7 @@ async function scanRenderedFallback(
   finalUrl: string,
   initialHtml: string,
   headers: Headers,
-  initialSignals: WebsiteSignals,
+  statusCode?: number,
 ): Promise<WebsiteScanResult> {
   try {
     const rendered = await renderWithPlaywright(finalUrl || normalizedUrl);
@@ -144,14 +144,15 @@ async function scanRenderedFallback(
 
     const renderedSignals = extractWebsiteSignals(rendered.html, rendered.text);
 
-    if (renderedSignals.wordCount < 20) {
-      return partialManualReviewScan(
+    if (renderedSignals.wordCount < 40) {
+      return await partialManualReviewScan(
         lead,
         normalizedUrl,
         rendered.finalUrl || finalUrl,
         rendered.html || initialHtml,
         headers,
-        "Homepage appears JavaScript-rendered, but rendered text was still too short for confident analysis.",
+        "Rendered page text was still too short for confident automatic analysis.",
+        statusCode,
       );
     }
 
@@ -163,15 +164,23 @@ async function scanRenderedFallback(
       headers,
       rendered.text,
       true,
+      statusCode,
     );
   } catch (error) {
-    return partialManualReviewScan(
+    const initialSignals = extractWebsiteSignals(initialHtml);
+
+    if (initialSignals.wordCount >= 120 && !looksJavaScriptRendered(initialHtml, initialSignals)) {
+      return analyzedScan(lead, normalizedUrl, finalUrl, initialHtml, headers, "", false, statusCode);
+    }
+
+    return await partialManualReviewScan(
       lead,
       normalizedUrl,
       finalUrl,
       initialHtml,
       headers,
-      `Homepage appears JavaScript-rendered, but Playwright rendering failed: ${getErrorMessage(error)}`,
+      `Playwright rendering failed and there was not enough readable public content for a confident review: ${getErrorMessage(error)}`,
+      statusCode,
     );
   }
 }
@@ -190,8 +199,8 @@ async function analyzedScan(
   const signals = extractWebsiteSignals(html, renderedText);
   const businessIdentity = detectBusinessIdentity(lead, html, finalUrl, signals);
   const issues = findWebsiteIssues(signals, builder, isJavaScriptRendered);
-  const websiteScore = scoreWebsiteOpportunity(issues, builder);
   const scoreBreakdown = buildScoreBreakdown(issues, builder, signals);
+  const websiteScore = scoreBreakdown.overall_score;
   const screenshots = await captureScreenshots(finalUrl);
 
   return {
@@ -212,20 +221,22 @@ async function analyzedScan(
   };
 }
 
-function partialManualReviewScan(
+async function partialManualReviewScan(
   lead: LeadRecord,
   normalizedUrl: string,
   finalUrl: string,
   html: string,
   headers: Headers,
   error: string,
-): WebsiteScanResult {
+  statusCode?: number,
+): Promise<WebsiteScanResult> {
   const builder = detectBuilder(html, headers);
   const signals = extractWebsiteSignals(html);
   const businessIdentity = detectBusinessIdentity(lead, html, finalUrl, signals);
   const issues = findWebsiteIssues(signals, builder, true);
-  const websiteScore = scoreWebsiteOpportunity(issues, builder);
   const scoreBreakdown = buildScoreBreakdown(issues, builder, signals);
+  const websiteScore = scoreBreakdown.overall_score;
+  const screenshots = await captureScreenshots(finalUrl);
 
   return {
     lead,
@@ -234,6 +245,7 @@ function partialManualReviewScan(
     status: "needs_manual_review",
     success: false,
     error,
+    statusCode,
     isJavaScriptRendered: true,
     renderNote: error,
     builder,
@@ -242,7 +254,7 @@ function partialManualReviewScan(
     issues,
     websiteScore,
     scoreBreakdown,
-    screenshots: emptyScreenshots(),
+    screenshots,
   };
 }
 
@@ -286,10 +298,16 @@ async function fetchHomepage(url: string): Promise<Response> {
 
 async function renderWithPlaywright(url: string): Promise<RenderedPage> {
   const playwright = await importPlaywright();
-  const browser = await playwright.chromium.launch({ headless: true });
+  const browser = await playwright.chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
+  });
 
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage({
+      viewport: { width: 1440, height: 1000 },
+      userAgent: "web-design-outreach/1.0 public-website-preview",
+    });
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: renderTimeoutMs });
     await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
 
@@ -320,11 +338,16 @@ function looksJavaScriptRendered(html: string, signals: WebsiteSignals): boolean
   const normalizedText = text.replace(/[.\s]/g, "");
 
   return (
-    signals.wordCount < 20 ||
+    signals.wordCount < 300 ||
     normalizedText === "loading" ||
     normalizedText === "pleasewait" ||
+    html.split(/<script\b/i).length > 15 ||
     (html.trim().length < 500 && signals.wordCount < 40)
   );
+}
+
+function shouldUseRenderedAnalysis(html: string, signals: WebsiteSignals): boolean {
+  return looksJavaScriptRendered(html, signals) || signals.wordCount < 300;
 }
 
 function looksBlockedOrPrivate(content: string): boolean {
@@ -395,6 +418,8 @@ function emptyBusinessIdentity(lead: LeadRecord, url: string): BusinessIdentity 
 function emptyScoreBreakdown(): ScoreBreakdown {
   return {
     overall_score: 0,
+    website_quality_score: 0,
+    score_confidence: "low",
     cta_score: 0,
     seo_score: 0,
     contact_visibility_score: 0,
@@ -428,20 +453,51 @@ function emptySignals(): WebsiteSignals {
   return {
     title: "",
     metaDescription: "",
+    ogSiteName: "",
+    ogTitle: "",
+    applicationName: "",
     wordCount: 0,
     textExcerpt: "",
+    h1Text: [],
+    h2Text: [],
+    linkButtonText: [],
+    logoAltText: [],
+    phoneNumbers: [],
+    emails: [],
     hasClearCta: false,
+    hasHeroHeadline: false,
+    hasCtaAboveFold: false,
     hasPhone: false,
     hasEmail: false,
     hasBookingOrContactButton: false,
+    hasContactFormOrPage: false,
+    hasAddressOrLocation: false,
+    hasMapOrLocationSection: false,
+    hasMenuServicesProducts: false,
+    hasOnlineOrdering: false,
+    hasReservations: false,
+    hasHours: false,
+    hasDeliveryPickup: false,
+    hasReviewsOrTestimonials: false,
+    hasSocialLinks: false,
     hasTrustSignals: false,
     hasNavigation: false,
+    hasViewportMeta: false,
     oldCopyrightYear: null,
     weakTitle: true,
     weakMetaDescription: true,
+    veryThinContent: true,
+    unclearNavigation: true,
+    tooManyCtas: false,
+    brokenOrEmptySections: false,
+    scriptCount: 0,
+    imageCount: 0,
     genericPhrases: [],
     corporateSignals: [],
     navigationLabels: [],
+    schemaTypes: [],
+    schemaNames: [],
+    likelyIndustry: "unknown",
   };
 }
 

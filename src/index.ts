@@ -2,6 +2,7 @@ import "dotenv/config";
 import path from "node:path";
 import { hasOpenAiKey } from "./openaiClient.js";
 import { generateHtmlReport } from "./report.js";
+import { getReportOutputPath } from "./runtimePaths.js";
 import {
   analyzeLeadToResult,
   defaultCsvOutputPath,
@@ -31,7 +32,7 @@ async function main(): Promise<void> {
     console.log("No input websites found. Add websites to data/leads.csv or run with --url.");
     await saveResults(results, jsonOutputPath, csvOutputPath);
     printSummary(results, jsonOutputPath, csvOutputPath);
-    await generateHtmlReport(jsonOutputPath, "reports/index.html");
+    await generateHtmlReport(jsonOutputPath, getReportOutputPath());
     return;
   }
 
@@ -57,7 +58,7 @@ async function main(): Promise<void> {
 
   await saveResults(results, jsonOutputPath, csvOutputPath);
   printSummary(results, jsonOutputPath, csvOutputPath);
-  await generateHtmlReport(jsonOutputPath, "reports/index.html");
+  await generateHtmlReport(jsonOutputPath, getReportOutputPath());
   console.log("Done. Review every record before importing it into a CRM or contacting anyone.");
 }
 

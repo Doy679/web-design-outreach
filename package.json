@@ -9,7 +9,8 @@
     "report": "tsx src/report.ts",
     "preview": "tsx src/server.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/server.js",
+    "cli": "node dist/index.js"
   },
   "dependencies": {
     "csv-parse": "^5.5.6",

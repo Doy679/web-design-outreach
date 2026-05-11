@@ -24,32 +24,32 @@ export function detectBusinessIdentity(
     candidates.push({ name: jsonLdIdentity.name, confidence: "high", source: jsonLdIdentity.source });
   }
 
-  const ogSiteName = getMetaContent(html, "property", "og:site_name");
+  const ogSiteName = signals.ogSiteName || getMetaContent(html, "property", "og:site_name");
   if (ogSiteName) {
-    candidates.push({ name: ogSiteName, confidence: "high", source: "og:site_name" });
+    candidates.push({ name: ogSiteName, confidence: "high", source: "og_site_name" });
   }
 
-  const applicationName = getMetaContent(html, "name", "application-name");
+  const applicationName = signals.applicationName || getMetaContent(html, "name", "application-name");
   if (applicationName) {
     candidates.push({ name: applicationName, confidence: "medium", source: "application-name" });
   }
 
-  const h1 = extractFirstTagText(html, "h1");
+  const h1 = signals.h1Text[0] || extractFirstTagText(html, "h1");
   if (h1) {
     candidates.push({ name: h1, confidence: "medium", source: "h1" });
   }
 
-  const titleName = cleanTitle(signals.title);
+  const logoAlt = signals.logoAltText[0] || extractLogoAlt(html);
+  if (logoAlt) {
+    candidates.push({ name: logoAlt, confidence: "medium", source: "logo_alt" });
+  }
+
+  const titleName = cleanTitle(signals.title || signals.ogTitle);
   if (titleName) {
     candidates.push({ name: titleName, confidence: "medium", source: "title" });
   }
 
-  const logoAlt = extractLogoAlt(html);
-  if (logoAlt) {
-    candidates.push({ name: logoAlt, confidence: "low", source: "logo alt" });
-  }
-
-  candidates.push({ name: domainFallback(finalUrl || lead.website_url), confidence: "low", source: "domain" });
+  candidates.push({ name: domainFallback(finalUrl || lead.website_url), confidence: "low", source: "domain_fallback" });
 
   const best = candidates.find((candidate) => candidate.name.trim()) ?? {
     name: "Unknown Website",
@@ -165,7 +165,8 @@ function extractLogoAlt(html: string): string {
 }
 
 function cleanTitle(title: string): string {
-  return normalizeName(title.split(/\s[|-]\s/)[0] ?? title);
+  const firstSegment = title.split(/\s(?:[|–—-]|::)\s/)[0] ?? title;
+  return cleanBusinessName(firstSegment);
 }
 
 function domainFallback(value: string): string {
@@ -173,11 +174,13 @@ function domainFallback(value: string): string {
     const candidate = /^https?:\/\//i.test(value) ? value : `https://${value}`;
     const hostname = new URL(candidate).hostname.replace(/^www\./i, "");
     const firstPart = hostname.split(".")[0] ?? hostname;
-    return firstPart
-      .split(/[-_]/)
-      .filter(Boolean)
-      .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-      .join(" ");
+    const spaced = firstPart
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .replace(/[-_]+/g, " ")
+      .replace(/([a-z])(\d)/gi, "$1 $2")
+      .replace(/(\d)([a-z])/gi, "$1 $2");
+
+    return titleCase(spaced);
   } catch {
     return "Unknown Website";
   }
@@ -222,5 +225,41 @@ function decodeHtml(value: string): string {
 }
 
 function normalizeName(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  return cleanBusinessName(value);
+}
+
+function cleanBusinessName(value: string): string {
+  let cleaned = value
+    .replace(/\blogo\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const suffixes = [
+    "Home",
+    "Official Site",
+    "Welcome",
+    "Restaurant",
+    "Services",
+    "Best",
+    "Near Me",
+    "Website",
+  ];
+
+  for (const suffix of suffixes) {
+    cleaned = cleaned.replace(new RegExp(`\\s*(?:[-|–—:]\\s*)?${escapeRegExp(suffix)}\\s*$`, "i"), "").trim();
+  }
+
+  return cleaned;
+}
+
+function titleCase(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1).toLowerCase()}`)
+    .join(" ");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

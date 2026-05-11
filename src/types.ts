@@ -32,9 +32,10 @@ export type ReviewStatus =
 
 export type IssueUrgency = "Low" | "Medium" | "High";
 
-export type IssueCategory = "CTA" | "SEO" | "Contact" | "UX" | "Trust" | "Speed" | "Conversion";
+export type IssueCategory = "CTA" | "SEO" | "Contact" | "UX" | "Trust" | "Speed" | "Conversion" | "Content" | "Local";
 
 export type PriorityLevel = "Low" | "Medium" | "High";
+export type ScoreConfidence = "high" | "medium" | "low";
 
 export interface LeadRecord {
   business_name: string;
@@ -61,20 +62,51 @@ export interface BusinessIdentity {
 export interface WebsiteSignals {
   title: string;
   metaDescription: string;
+  ogSiteName: string;
+  ogTitle: string;
+  applicationName: string;
   wordCount: number;
   textExcerpt: string;
+  h1Text: string[];
+  h2Text: string[];
+  linkButtonText: string[];
+  logoAltText: string[];
+  phoneNumbers: string[];
+  emails: string[];
   hasClearCta: boolean;
+  hasHeroHeadline: boolean;
+  hasCtaAboveFold: boolean;
   hasPhone: boolean;
   hasEmail: boolean;
   hasBookingOrContactButton: boolean;
+  hasContactFormOrPage: boolean;
+  hasAddressOrLocation: boolean;
+  hasMapOrLocationSection: boolean;
+  hasMenuServicesProducts: boolean;
+  hasOnlineOrdering: boolean;
+  hasReservations: boolean;
+  hasHours: boolean;
+  hasDeliveryPickup: boolean;
+  hasReviewsOrTestimonials: boolean;
+  hasSocialLinks: boolean;
   hasTrustSignals: boolean;
   hasNavigation: boolean;
+  hasViewportMeta: boolean;
   oldCopyrightYear: number | null;
   weakTitle: boolean;
   weakMetaDescription: boolean;
+  veryThinContent: boolean;
+  unclearNavigation: boolean;
+  tooManyCtas: boolean;
+  brokenOrEmptySections: boolean;
+  scriptCount: number;
+  imageCount: number;
   genericPhrases: string[];
   corporateSignals: string[];
   navigationLabels: string[];
+  schemaTypes: string[];
+  schemaNames: string[];
+  likelyIndustry: string;
 }
 
 export interface WebsiteIssue {
@@ -92,6 +124,8 @@ export interface WebsiteIssue {
 
 export interface ScoreBreakdown {
   overall_score: number;
+  website_quality_score: number;
+  score_confidence: ScoreConfidence;
   cta_score: number;
   seo_score: number;
   contact_visibility_score: number;
@@ -136,8 +170,11 @@ export interface AiCrmFields {
   detected_builder: string;
   builder_confidence: string;
   business_name_confidence: string;
+  business_name_source: string;
   is_javascript_rendered: boolean;
   overall_score: number;
+  website_quality_score: number;
+  score_confidence: ScoreConfidence;
   cta_score: number;
   seo_score: number;
   contact_visibility_score: number;
@@ -180,9 +217,12 @@ export interface OutreachResult extends LeadRecord {
   detected_builder: string;
   builder_confidence: string;
   business_name_confidence: string;
+  business_name_source: string;
   is_javascript_rendered: boolean;
   website_score: number;
   overall_score: number;
+  website_quality_score: number;
+  score_confidence: ScoreConfidence;
   cta_score: number;
   seo_score: number;
   contact_visibility_score: number;

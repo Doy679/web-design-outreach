@@ -43,6 +43,8 @@ Open:
 http://localhost:3000
 ```
 
+After building, `npm start` serves the same dashboard from `dist/server.js`.
+
 Use the dashboard to:
 
 - paste a URL into `Analyze Website URL`
@@ -106,6 +108,12 @@ Optional rate limit override:
 ```bash
 FETCH_DELAY_MS=5000 npm run dev -- --csv data/leads.csv
 ```
+
+## Vercel Deployment
+
+This project includes `api/index.js` and `vercel.json` so Vercel runs the dashboard through a Node.js Function. Set `OPENAI_API_KEY` and, optionally, `OPENAI_MODEL` in the Vercel project environment variables.
+
+On Vercel, generated results and screenshots are written to `/tmp` because deployment files are not persistent writable storage. That keeps the function from crashing, but data can be lost on cold starts or new deployments. Use a database or Vercel storage product if you need permanent hosted results.
 
 ## Output Files
 

@@ -1,7 +1,8 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { getResultId, readResultsFile, reviewStatuses } from "./workflow.js";
+import { getReportOutputPath } from "./runtimePaths.js";
+import { defaultJsonOutputPath, getResultId, readResultsFile, reviewStatuses } from "./workflow.js";
 import type { EmailCopyReview, OutreachResult, WebsiteIssue } from "./types.js";
 
 interface DashboardStats {
@@ -14,23 +15,28 @@ interface DashboardStats {
   averageScore: string;
 }
 
-const defaultInputPath = "data/results.json";
-const defaultOutputPath = "reports/index.html";
+const defaultInputPath = defaultJsonOutputPath;
+const defaultOutputPath = getReportOutputPath();
 
 export async function generateHtmlReport(
   inputPath = defaultInputPath,
   outputPath = defaultOutputPath,
 ): Promise<void> {
   const absoluteOutputPath = path.resolve(outputPath);
-  const results = await readResultsFile(inputPath);
-  const stats = buildStats(results);
-  const html = buildHtml(results, stats);
+  const html = await renderHtmlReport(inputPath);
 
   await mkdir(path.dirname(absoluteOutputPath), { recursive: true });
   await writeFile(absoluteOutputPath, html, "utf8");
 
   console.log(`Saved HTML report to ${path.relative(process.cwd(), absoluteOutputPath)}`);
   console.log("Open reports/index.html in your browser to review the outreach dashboard.");
+}
+
+export async function renderHtmlReport(inputPath = defaultInputPath): Promise<string> {
+  const results = await readResultsFile(inputPath);
+  const stats = buildStats(results);
+
+  return buildHtml(results, stats);
 }
 
 function buildStats(results: OutreachResult[]): DashboardStats {
@@ -129,7 +135,7 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(7, minmax(126px, 1fr));
+      grid-template-columns: repeat(6, minmax(126px, 1fr));
       gap: 12px;
       margin: 22px 0;
     }
@@ -461,6 +467,25 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       border-radius: 6px;
     }
 
+    .screenshot-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .screenshot-title h3 {
+      margin: 0;
+      font-size: 0.96rem;
+    }
+
+    .screenshot-title a {
+      font-size: 0.82rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
     .unavailable {
       display: grid;
       place-items: center;
@@ -560,7 +585,7 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
   <main class="shell">
     <header class="topbar">
       <h1>Web Design Outreach Analyzer</h1>
-      <p class="subtitle">Bad website identifier, personalized analysis, and outreach copy review.</p>
+      <p class="subtitle">Website opportunity scoring, visual review, and outreach copy preparation.</p>
       <div class="generated">Generated ${escapeHtml(generatedAt)}</div>
     </header>
 
@@ -570,8 +595,7 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       ${renderStat("Needs Review", stats.needsReview)}
       ${renderStat("Not Qualified But Analyzed", stats.notQualifiedButAnalyzed)}
       ${renderStat("Fetch Failed", stats.fetchFailed)}
-      ${renderStat("Opted Out", stats.optedOut)}
-      ${renderStat("Average Score", stats.averageScore)}
+      ${renderStat("Average Opportunity Score", stats.averageScore)}
     </section>
 
     <section class="panel analyze-panel" aria-label="Analyze website">
@@ -688,10 +712,11 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
     const noMatches = document.querySelector("#noMatches");
     const analysisSteps = [
       "Fetching website",
-      "Detecting builder/CMS",
+      "Rendering page",
       "Capturing screenshots",
-      "Checking website issues",
-      "Generating outreach copy",
+      "Detecting website signals",
+      "Scoring opportunity",
+      "Writing outreach copy",
       "Saving result"
     ];
 
@@ -885,8 +910,10 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
           throw new Error(data.error || "Unable to save review.");
         }
 
-        saveMessage.textContent = "Saved. Refreshing dashboard...";
-        window.location.reload();
+        card.dataset.status = statusSelect.value.toLowerCase();
+        const statusBadge = card.querySelector(".status-badge");
+        if (statusBadge) statusBadge.textContent = statusSelect.value;
+        saveMessage.textContent = "Saved";
       } catch (error) {
         saveMessage.textContent = error.message || "Unable to save review. Make sure npm run preview is running.";
       }
@@ -896,7 +923,7 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       try {
         await navigator.clipboard.writeText(text);
         const original = button.textContent;
-        button.textContent = "Copied";
+        button.textContent = "Copied!";
         window.setTimeout(() => { button.textContent = original; }, 1200);
       } catch {
         window.prompt("Copy this text:", text);
@@ -961,7 +988,7 @@ function renderResultCard(result: OutreachResult): string {
     result.main_issue,
     result.issues.map((issue) => issue.issue).join(" "),
   ].join(" ").toLowerCase();
-  const crmRow = JSON.stringify(buildCrmRow(result), null, 2);
+  const crmRow = buildCrmRow(result);
 
   return `<article class="result-card" data-id="${escapeAttribute(id)}" data-search="${escapeAttribute(searchText)}" data-status="${escapeAttribute(result.status.toLowerCase())}" data-priority="${escapeAttribute(priorityClass)}">
   <div class="card-head">
@@ -971,12 +998,13 @@ function renderResultCard(result: OutreachResult): string {
         <span>${websiteLink}</span>
         <span>${escapeHtml(result.industry || "Industry not specified")}</span>
         <span>${escapeHtml(result.location || "Location not specified")}</span>
-        <span>Business name confidence: ${escapeHtml(result.business_name_confidence || "low")}</span>
+        <span>Name confidence: ${escapeHtml(result.business_name_confidence || "low")}</span>
+        <span>Name source: ${escapeHtml(result.business_name_source || "unknown")}</span>
       </div>
     </div>
     <div class="badges">
       <span class="badge ${escapeAttribute(priorityClass)}">${escapeHtml(result.priority_level)} Priority</span>
-      <span class="badge">${escapeHtml(result.status)}</span>
+      <span class="badge status-badge">${escapeHtml(result.status)}</span>
       <span class="badge">${escapeHtml(formatLabel(result.analysis_status))}</span>
       <span class="badge ${result.qualified ? "low" : "medium"}">${result.qualified ? "Qualified" : "Not Qualified"}</span>
     </div>
@@ -987,6 +1015,9 @@ function renderResultCard(result: OutreachResult): string {
       <summary>Overview</summary>
       <div class="facts">
         ${renderFact("Website", stripProtocol(result.website_url))}
+        ${renderFact("Business Name", result.business_name || "Unknown Website")}
+        ${renderFact("Name Confidence", result.business_name_confidence || "low")}
+        ${renderFact("Name Source", result.business_name_source || "unknown")}
         ${renderFact("Builder/CMS", `${result.detected_builder} (${result.builder_confidence})`)}
         ${renderFact("Industry", result.industry || "Not specified")}
         ${renderFact("Location", result.location || "Not specified")}
@@ -1003,7 +1034,9 @@ function renderResultCard(result: OutreachResult): string {
     <details open>
       <summary>Scores</summary>
       <div class="scores">
-        ${renderScore("Overall", result.overall_score)}
+        ${renderScore("Redesign Opportunity", result.overall_score)}
+        ${renderScore("Website Quality", result.website_quality_score)}
+        ${renderScore("Score Confidence", result.score_confidence)}
         ${renderScore("CTA", result.cta_score)}
         ${renderScore("SEO", result.seo_score)}
         ${renderScore("Contact Visibility", result.contact_visibility_score)}
@@ -1078,7 +1111,7 @@ function renderFact(label: string, value: string): string {
   return `<div class="fact"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`;
 }
 
-function renderScore(label: string, score: number): string {
+function renderScore(label: string, score: number | string): string {
   return `<div class="score-box"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(score || 0))}</strong></div>`;
 }
 
@@ -1097,6 +1130,7 @@ function renderIssues(issues: WebsiteIssue[]): string {
         </div>
         <h3>${escapeHtml(issue.issue || issue.label)}</h3>
         <p>${escapeHtml(issue.detail || issue.evidence)}</p>
+        <p><strong>Evidence:</strong> ${escapeHtml(issue.evidence || issue.detail)}</p>
         <p><strong>Why it matters:</strong> ${escapeHtml(issue.why_it_matters)}</p>
         <p><strong>Suggested fix:</strong> ${escapeHtml(issue.suggested_fix)}</p>
       </article>`;
@@ -1105,16 +1139,28 @@ function renderIssues(issues: WebsiteIssue[]): string {
 }
 
 function renderScreenshot(label: string, screenshotPath: string): string {
-  const src = screenshotPath ? `../${screenshotPath.replace(/\\/g, "/")}` : "";
+  const src = getScreenshotSrc(screenshotPath);
 
   return `<div class="screenshot-box">
-    <h3>${escapeHtml(label)}</h3>
+    <div class="screenshot-title">
+      <h3>${escapeHtml(label)} Preview</h3>
+      ${src ? `<a href="${escapeAttribute(src)}" target="_blank" rel="noreferrer">Open Screenshot</a>` : ""}
+    </div>
     ${
       src
         ? `<img src="${escapeAttribute(src)}" alt="${escapeAttribute(label)} screenshot preview">`
         : '<div class="unavailable">Screenshot unavailable.</div>'
     }
   </div>`;
+}
+
+function getScreenshotSrc(screenshotPath: string): string {
+  if (!screenshotPath) return "";
+  const normalized = screenshotPath.replace(/\\/g, "/");
+  if (normalized.startsWith("/screenshots/")) return normalized;
+  if (normalized.startsWith("data/screenshots/")) return normalized.replace(/^data\/screenshots\//, "/screenshots/");
+  if (normalized.startsWith("/data/screenshots/")) return normalized.replace(/^\/data\/screenshots\//, "/screenshots/");
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
 }
 
 function renderEmailBox(result: OutreachResult, version: "friendly" | "direct" | "premium", body: string): string {
@@ -1167,26 +1213,21 @@ function renderEmptyState(): string {
   return '<div class="empty">No websites analyzed yet. Paste a URL above and click Analyze Website.</div>';
 }
 
-function buildCrmRow(result: OutreachResult): Record<string, unknown> {
-  return {
-    business_name: result.business_name,
-    website_url: result.website_url,
-    industry: result.industry,
-    location: result.location,
-    email: result.email,
-    status: result.status,
-    analysis_status: result.analysis_status,
-    qualified: result.qualified,
-    overall_score: result.overall_score,
-    priority_level: result.priority_level,
-    main_issue: result.main_issue,
-    recommended_offer: result.recommended_offer,
-    cold_email_subject: result.cold_email_subject,
-    cold_email_body: result.cold_email_body,
-    crm_stage: result.crm_stage,
-    notes: result.notes,
-    opt_out_status: result.opt_out_status,
-  };
+function buildCrmRow(result: OutreachResult): string {
+  return [
+    result.business_name,
+    result.website_url,
+    result.industry,
+    result.location,
+    String(result.overall_score),
+    result.priority_level,
+    result.status,
+    result.main_issue,
+    result.recommended_email_version,
+    result.cold_email_body,
+  ]
+    .map((value) => String(value ?? "").replace(/\s+/g, " ").trim())
+    .join("\t");
 }
 
 function isOptedOut(status: string): boolean {

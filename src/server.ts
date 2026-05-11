@@ -2,8 +2,10 @@ import "dotenv/config";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseLeadsCsv, stringifyResults } from "./csv.js";
-import { generateHtmlReport } from "./report.js";
+import { generateHtmlReport, renderHtmlReport } from "./report.js";
+import { getRuntimeDataDir, getRuntimeReportDir } from "./runtimePaths.js";
 import {
   analyzeLeadToResult,
   appendResult,
@@ -21,8 +23,8 @@ import type { LeadRecord, ReviewStatus } from "./types.js";
 
 const host = "127.0.0.1";
 const defaultPort = 3000;
-const reportsDir = path.resolve("reports");
-const dataDir = path.resolve("data");
+const reportsDir = path.resolve(getRuntimeReportDir());
+const dataDir = path.resolve(getRuntimeDataDir());
 const uploadDelayMs = 1500;
 
 async function main(): Promise<void> {
@@ -65,7 +67,7 @@ function listen(port: number): Promise<Server> {
   });
 }
 
-async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+export async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   try {
     const url = new URL(request.url ?? "/", "http://localhost");
 
@@ -115,6 +117,16 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
       return;
     }
 
+    if (request.method === "GET" && url.pathname.startsWith("/screenshots/")) {
+      await serveScreenshotFile(url.pathname, response);
+      return;
+    }
+
+    if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) {
+      await serveDashboard(response);
+      return;
+    }
+
     await serveReportFile(url.pathname, response);
   } catch (error) {
     sendJson(response, 500, { success: false, error: getErrorMessage(error) });
@@ -153,7 +165,7 @@ async function handleAnalyze(request: IncomingMessage, response: ServerResponse)
     };
     const result = await analyzeLeadToResult(makeLeadFromInput(input));
     const results = await appendResult(result, defaultJsonOutputPath, defaultCsvOutputPath);
-    await generateHtmlReport(defaultJsonOutputPath, "reports/index.html");
+    await generateHtmlReport(defaultJsonOutputPath);
 
     sendJson(response, 200, {
       success: true,
@@ -191,7 +203,7 @@ async function handleUpdateResult(
     defaultJsonOutputPath,
     defaultCsvOutputPath,
   );
-  await generateHtmlReport(defaultJsonOutputPath, "reports/index.html");
+  await generateHtmlReport(defaultJsonOutputPath);
 
   sendJson(response, 200, {
     success: true,
@@ -226,7 +238,7 @@ async function handleUploadCsv(request: IncomingMessage, response: ServerRespons
     }
   }
 
-  await generateHtmlReport(defaultJsonOutputPath, "reports/index.html");
+  await generateHtmlReport(defaultJsonOutputPath);
   sendJson(response, 200, {
     success: true,
     analyzed,
@@ -254,6 +266,15 @@ async function handleExportJson(response: ServerResponse): Promise<void> {
     "cache-control": "no-store",
   });
   response.end(`${JSON.stringify(results, null, 2)}\n`);
+}
+
+async function serveDashboard(response: ServerResponse): Promise<void> {
+  const html = await renderHtmlReport(defaultJsonOutputPath);
+  response.writeHead(200, {
+    "content-type": "text/html; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  response.end(html);
 }
 
 async function serveReportFile(pathname: string, response: ServerResponse): Promise<void> {
@@ -296,6 +317,11 @@ async function serveDataFile(pathname: string, response: ServerResponse): Promis
   } catch {
     sendNotFound(response);
   }
+}
+
+async function serveScreenshotFile(pathname: string, response: ServerResponse): Promise<void> {
+  const screenshotPath = pathname.replace(/^\/screenshots\//, "/data/screenshots/");
+  await serveDataFile(screenshotPath, response);
 }
 
 function readJsonBody(request: IncomingMessage, maxBytes = 500_000): Promise<Record<string, unknown>> {
@@ -441,7 +467,13 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-main().catch((error: unknown) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
-});
+function isDirectRun(): boolean {
+  return Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+}
+
+if (isDirectRun()) {
+  main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
+}

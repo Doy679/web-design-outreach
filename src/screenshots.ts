@@ -1,5 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { getScreenshotDir } from "./runtimePaths.js";
 import type { ScreenshotCapture } from "./types.js";
 
 interface BrowserLike {
@@ -15,11 +16,10 @@ interface PageLike {
 
 interface PlaywrightLike {
   chromium: {
-    launch: (options: { headless: boolean }) => Promise<BrowserLike>;
+    launch: (options: { headless: boolean; args?: string[] }) => Promise<BrowserLike>;
   };
 }
 
-const screenshotDir = "data/screenshots";
 const screenshotTimeoutMs = 18000;
 
 export async function captureScreenshots(url: string): Promise<ScreenshotCapture> {
@@ -30,19 +30,28 @@ export async function captureScreenshots(url: string): Promise<ScreenshotCapture
 
   try {
     const playwright = await importPlaywright();
-    const browser = await playwright.chromium.launch({ headless: true });
+    const browser = await playwright.chromium.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    });
     const safeName = safeDomain(url);
-    const desktopPath = path.join(screenshotDir, `desktop-${safeName}.png`);
-    const mobilePath = path.join(screenshotDir, `mobile-${safeName}.png`);
+    const screenshotDir = getScreenshotDir();
+    const timestamp = Date.now();
+    const desktopFileName = `desktop-${safeName}-${timestamp}.png`;
+    const mobileFileName = `mobile-${safeName}-${timestamp}.png`;
+    const desktopFilePath = path.join(screenshotDir, desktopFileName);
+    const mobileFilePath = path.join(screenshotDir, mobileFileName);
+    const desktopPublicPath = `/screenshots/${desktopFileName}`;
+    const mobilePublicPath = `/screenshots/${mobileFileName}`;
 
     try {
       await mkdir(screenshotDir, { recursive: true });
-      await screenshotPage(browser, url, desktopPath, { width: 1440, height: 1000 });
-      await screenshotPage(browser, url, mobilePath, { width: 390, height: 844 });
+      await screenshotPage(browser, url, desktopFilePath, { width: 1440, height: 1000 });
+      await screenshotPage(browser, url, mobileFilePath, { width: 390, height: 844 });
 
       return {
-        desktop_screenshot_path: desktopPath,
-        mobile_screenshot_path: mobilePath,
+        desktop_screenshot_path: desktopPublicPath,
+        mobile_screenshot_path: mobilePublicPath,
       };
     } finally {
       await browser.close();
@@ -81,7 +90,7 @@ async function importPlaywright(): Promise<PlaywrightLike> {
 
 function safeDomain(url: string): string {
   try {
-    return new URL(url).hostname.replace(/^www\./i, "").replace(/[^a-z0-9.-]/gi, "-").toLowerCase();
+    return new URL(url).hostname.replace(/^www\./i, "").replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
   } catch {
     return `website-${Date.now()}`;
   }
