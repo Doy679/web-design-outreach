@@ -522,7 +522,7 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       width: 220px;
       height: 460px;
       background: #fff;
-      border: 8px solid #1e293b;
+      border: 8px solid #111827;
       border-radius: 32px;
       box-shadow: 0 15px 35px rgba(0,0,0,0.15);
       overflow: hidden;
@@ -542,8 +542,10 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       inset: 0;
       background: rgba(0,0,0,0.2);
       display: flex;
+      flex-direction: column;
       justify-content: center;
       align-items: center;
+      gap: 10px;
       opacity: 0;
       transition: opacity 0.2s;
       cursor: pointer;
@@ -557,7 +559,7 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
     .modal-backdrop {
       position: fixed;
       inset: 0;
-      background: rgba(15, 23, 42, 0.9);
+      background: rgba(15, 23, 42, 0.95);
       display: flex;
       justify-content: center;
       align-items: center;
@@ -575,8 +577,9 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
 
     .modal-content {
       background: var(--surface);
-      width: min(1400px, 100%);
-      max-height: 95vh;
+      width: 96vw;
+      height: 92vh;
+      max-width: 1400px;
       border-radius: 16px;
       display: flex;
       flex-direction: column;
@@ -617,34 +620,82 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       color: #fff;
     }
 
-    .viewer-container {
-      flex: 1;
-      overflow-y: auto;
-      background: #f8fafc;
-      padding: 40px;
+    .viewer-body-preview {
+      height: calc(92vh - 120px);
+      overflow: hidden;
       display: flex;
       justify-content: center;
       align-items: flex-start;
+      background: #f8fafc;
+      padding: 20px;
     }
 
-    .full-image-container {
-      background: #fff;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    .viewer-image-preview {
+      display: block;
       max-width: 100%;
+      max-height: 100%;
+      width: auto;
+      height: auto;
+      object-fit: contain;
+      object-position: top center;
+      margin: 0 auto;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
     }
 
-    .full-image-container.desktop {
-      width: 1280px;
+    .viewer-body-fullpage {
+      height: calc(92vh - 120px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      background: #f8fafc;
+      padding: 40px;
     }
 
-    .full-image-container.mobile {
+    .viewer-image-fullpage {
+      display: block;
+      width: 100%;
+      max-width: 1200px;
+      height: auto;
+      object-fit: contain;
+      object-position: top center;
+      margin: 0 auto;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+    }
+
+    .mobile-frame {
       width: 390px;
-      border: 12px solid #1e293b;
-      border-radius: 40px;
+      max-width: 90vw;
+      height: min(844px, calc(92vh - 140px));
       overflow: hidden;
+      border-radius: 28px;
+      border: 8px solid #111827;
+      background: #111827;
+      margin: 0 auto;
     }
 
-    .full-img {
+    .mobile-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top center;
+      display: block;
+    }
+
+    .mobile-frame-scroll {
+      width: 390px;
+      max-width: 90vw;
+      height: calc(92vh - 140px);
+      overflow-y: auto;
+      overflow-x: hidden;
+      border-radius: 28px;
+      border: 8px solid #111827;
+      background: #111827;
+      margin: 0 auto;
+    }
+
+    .mobile-frame-scroll img {
       width: 100%;
       height: auto;
       display: block;
@@ -1288,10 +1339,24 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       const { type, preview, full } = currentModalData;
       
       const src = view === "preview" ? preview : full;
+      const isMobile = type === "mobile";
       
-      container.innerHTML = '<div class="full-image-container ' + type + ' ' + (view === "full" ? "full-scroll" : "") + '">' +
-                            '<img src="' + src + '" class="full-img" alt="Screenshot ' + view + '">' +
-                            '</div>';
+      if (view === "preview") {
+        container.className = "viewer-body-preview";
+        if (isMobile) {
+          container.innerHTML = '<div class="mobile-frame"><img src="' + src + '" alt="Mobile Preview"></div>';
+        } else {
+          container.innerHTML = '<img src="' + src + '" class="viewer-image-preview" alt="Desktop Preview">';
+        }
+      } else {
+        container.className = "viewer-body-fullpage";
+        if (isMobile) {
+          container.innerHTML = '<div class="mobile-frame-scroll"><img src="' + src + '" alt="Mobile Full Page"></div>';
+        } else {
+          container.innerHTML = '<img src="' + src + '" class="viewer-image-fullpage" alt="Desktop Full Page">';
+        }
+        container.scrollTop = 0;
+      }
       
       viewRawLink.href = src;
       downloadLink.href = src;
@@ -1300,6 +1365,33 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       document.querySelectorAll("#modalTabs .tab-btn").forEach(btn => {
         btn.classList.toggle("active", btn.dataset.view === view);
       });
+    }
+
+    async function handleRecapture(button) {
+      const { id, url } = button.dataset;
+      const originalText = button.textContent;
+      button.disabled = true;
+      button.textContent = "↺...";
+      
+      try {
+        const response = await fetch("/api/screenshots/recapture", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id, website_url: url }),
+        });
+        const data = await response.json();
+        
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || "Recapture failed.");
+        }
+        
+        setStatus(dashboardMessage, "Screenshots updated. Refreshing...", "success");
+        setTimeout(() => window.location.reload(), 1000);
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = originalText;
+        setStatus(dashboardMessage, error.message, "error");
+      }
     }
 
     function closeModal() {
@@ -1342,6 +1434,8 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
         closeModal();
       } else if (button.closest("#modalTabs") && button.matches(".tab-btn")) {
         renderModalView(button.dataset.view);
+      } else if (button.matches(".recapture-btn")) {
+        handleRecapture(button);
       } else if (button.matches(".remove-result")) {
         removeCardResult(button.closest(".result-card"));
       } else if (button.matches(".copy-email")) {
@@ -1604,11 +1698,16 @@ function renderScreenshotCard(result: OutreachResult, label: string, type: "desk
   const fullPath = type === "desktop" ? result.desktop_full_screenshot_path : result.mobile_full_screenshot_path;
   const frameClass = type === "desktop" ? "desktop-preview-frame" : "mobile-preview-frame";
   
-  if (!previewPath && !fullPath) {
+  if (!previewPath || previewPath.includes("skinny") || !previewPath.includes("preview")) {
     return `
       <div class="screenshot-card">
         <div class="screenshot-header"><h3>${escapeHtml(label)} Preview</h3></div>
-        <div class="preview-container"><p class="muted">Screenshot unavailable</p></div>
+        <div class="preview-container" style="flex-direction: column; gap: 10px;">
+          <p class="muted">Preview unavailable or legacy format.</p>
+          <button type="button" class="secondary recapture-btn" 
+            data-id="${escapeAttribute(result.id)}" 
+            data-url="${escapeAttribute(result.website_url)}">Re-capture Screenshots</button>
+        </div>
       </div>
     `;
   }
@@ -1617,22 +1716,27 @@ function renderScreenshotCard(result: OutreachResult, label: string, type: "desk
     <div class="screenshot-card">
       <div class="screenshot-header">
         <h3>${escapeHtml(label)} Preview</h3>
-        <button type="button" class="tab-btn open-modal-trigger" 
-          data-type="${type}" 
-          data-preview="${escapeAttribute(previewPath)}" 
-          data-full="${escapeAttribute(fullPath)}"
-          data-business="${escapeAttribute(result.business_name)}">View Detail</button>
+        <div style="display: flex; gap: 8px;">
+          <button type="button" class="tab-btn recapture-btn" title="Re-capture"
+            data-id="${escapeAttribute(result.id)}" 
+            data-url="${escapeAttribute(result.website_url)}">↺</button>
+          <button type="button" class="tab-btn open-modal-trigger" 
+            data-type="${type}" 
+            data-preview="${escapeAttribute(previewPath)}" 
+            data-full="${escapeAttribute(fullPath)}"
+            data-business="${escapeAttribute(result.business_name)}">View</button>
+        </div>
       </div>
-      <div class="preview-container">
+      <div class="preview-container open-modal-trigger" 
+        data-type="${type}" 
+        data-preview="${escapeAttribute(previewPath)}" 
+        data-full="${escapeAttribute(fullPath)}"
+        data-business="${escapeAttribute(result.business_name)}">
         <div class="${frameClass}">
           <img src="${escapeAttribute(previewPath)}" alt="${escapeAttribute(label)} preview" class="preview-img" loading="lazy">
         </div>
-        <div class="view-btn-overlay open-modal-trigger" 
-          data-type="${type}" 
-          data-preview="${escapeAttribute(previewPath)}" 
-          data-full="${escapeAttribute(fullPath)}"
-          data-business="${escapeAttribute(result.business_name)}">
-          <button type="button">Open Viewer</button>
+        <div class="view-btn-overlay">
+          <button type="button">Open Full Viewer</button>
         </div>
       </div>
     </div>
