@@ -468,34 +468,213 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
 
     .screenshot-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
     }
 
-    .screenshot-box {
+    .screenshot-card {
       background: #ffffff;
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+    }
+
+    .screenshot-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 16px;
+      background: var(--surface-soft);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .screenshot-header h3 {
+      margin: 0;
+      font-size: 0.9rem;
+      font-weight: 800;
+      color: var(--muted);
+    }
+
+    .preview-container {
+      position: relative;
+      background: #f1f5f9;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 20px;
       overflow: hidden;
     }
 
-    .screenshot-box img {
-      display: block;
+    .desktop-preview-frame {
       width: 100%;
-      height: 480px;
-      object-fit: cover;
-      object-position: top;
-      background: #eef2f7;
+      max-width: 640px;
+      height: 360px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+      overflow: hidden;
     }
 
-    .screenshot-title {
+    .mobile-preview-frame {
+      width: 220px;
+      height: 460px;
+      background: #fff;
+      border: 8px solid #1e293b;
+      border-radius: 32px;
+      box-shadow: 0 15px 35px rgba(0,0,0,0.15);
+      overflow: hidden;
+      position: relative;
+    }
+
+    .preview-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: top center;
+      display: block;
+    }
+
+    .view-btn-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.2);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      opacity: 0;
+      transition: opacity 0.2s;
+      cursor: pointer;
+    }
+
+    .preview-container:hover .view-btn-overlay {
+      opacity: 1;
+    }
+
+    /* Modal Styles */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.9);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+      padding: 20px;
+      visibility: hidden;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .modal-backdrop.active {
+      visibility: visible;
+      opacity: 1;
+    }
+
+    .modal-content {
+      background: var(--surface);
+      width: min(1400px, 100%);
+      max-height: 95vh;
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid var(--border);
       display: flex;
       justify-content: space-between;
-      gap: 10px;
       align-items: center;
-      padding: 10px 12px;
+    }
+
+    .modal-tabs {
+      display: flex;
+      gap: 8px;
+      padding: 12px 24px;
       background: var(--surface-soft);
       border-bottom: 1px solid var(--border);
+    }
+
+    .tab-btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 700;
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--muted);
+      width: auto;
+      min-height: auto;
+    }
+
+    .tab-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .viewer-container {
+      flex: 1;
+      overflow-y: auto;
+      background: #f8fafc;
+      padding: 40px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+
+    .full-image-container {
+      background: #fff;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+      max-width: 100%;
+    }
+
+    .full-image-container.desktop {
+      width: 1280px;
+    }
+
+    .full-image-container.mobile {
+      width: 390px;
+      border: 12px solid #1e293b;
+      border-radius: 40px;
+      overflow: hidden;
+    }
+
+    .full-img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .close-modal {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      font-size: 1.5rem;
+      cursor: pointer;
+      width: 40px;
+      height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-footer {
+      padding: 12px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 16px;
+      justify-content: flex-end;
+    }
+
+    .footer-link {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: var(--accent);
     }
 
     .screenshot-title h3 {
@@ -749,6 +928,21 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
     <div class="status-message" id="dashboardMessage" role="status" aria-live="polite"></div>
     <div class="empty" id="noMatches" hidden>No websites match the current filters. Clear filters to see all analyzed websites.</div>
   </main>
+
+  <div class="modal-backdrop" id="screenshotModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="modalTitle">Screenshot Viewer</h2>
+        <button type="button" class="close-modal" id="closeModal">&times;</button>
+      </div>
+      <div class="modal-tabs" id="modalTabs"></div>
+      <div class="viewer-container" id="viewerContainer"></div>
+      <div class="modal-footer">
+        <a href="#" target="_blank" class="footer-link" id="viewRawLink">Open in New Tab</a>
+        <a href="#" download class="footer-link" id="downloadLink">Download</a>
+      </div>
+    </div>
+  </div>
 
   <script>
     const analyzeUrlInput = document.querySelector("#analyzeUrlInput");
@@ -1067,6 +1261,54 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       card.querySelector(".save-message").textContent = "";
     }
 
+    let currentModalData = null;
+
+    function openScreenshotModal(trigger) {
+      const { type, preview, full, business } = trigger.dataset;
+      currentModalData = { type, preview, full, business };
+      
+      const modal = document.getElementById("screenshotModal");
+      const title = document.getElementById("modalTitle");
+      const tabs = document.getElementById("modalTabs");
+      
+      title.textContent = business + " - " + (type.charAt(0).toUpperCase() + type.slice(1)) + " Screenshot";
+      
+      tabs.innerHTML = '<button type="button" class="tab-btn active" data-view="preview">Preview (Above Fold)</button>' +
+                       '<button type="button" class="tab-btn" data-view="full">Full Page</button>';
+      
+      renderModalView("preview");
+      modal.classList.add("active");
+      document.body.style.overflow = "hidden";
+    }
+
+    function renderModalView(view) {
+      const container = document.getElementById("viewerContainer");
+      const viewRawLink = document.getElementById("viewRawLink");
+      const downloadLink = document.getElementById("downloadLink");
+      const { type, preview, full } = currentModalData;
+      
+      const src = view === "preview" ? preview : full;
+      
+      container.innerHTML = '<div class="full-image-container ' + type + ' ' + (view === "full" ? "full-scroll" : "") + '">' +
+                            '<img src="' + src + '" class="full-img" alt="Screenshot ' + view + '">' +
+                            '</div>';
+      
+      viewRawLink.href = src;
+      downloadLink.href = src;
+      downloadLink.download = src.split("/").pop();
+      
+      document.querySelectorAll("#modalTabs .tab-btn").forEach(btn => {
+        btn.classList.toggle("active", btn.dataset.view === view);
+      });
+    }
+
+    function closeModal() {
+      const modal = document.getElementById("screenshotModal");
+      modal.classList.remove("active");
+      document.body.style.overflow = "";
+      currentModalData = null;
+    }
+
     async function copyText(text, button) {
       try {
         await navigator.clipboard.writeText(text);
@@ -1094,6 +1336,12 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
         saveCardChanges(button.closest(".result-card"));
       } else if (button.matches(".cancel-edit")) {
         cancelCardEdit(button.closest(".result-card"));
+      } else if (button.closest(".open-modal-trigger")) {
+        openScreenshotModal(button.closest(".open-modal-trigger"));
+      } else if (button.matches("#closeModal") || button.matches("#screenshotModal")) {
+        closeModal();
+      } else if (button.closest("#modalTabs") && button.matches(".tab-btn")) {
+        renderModalView(button.dataset.view);
       } else if (button.matches(".remove-result")) {
         removeCardResult(button.closest(".result-card"));
       } else if (button.matches(".copy-email")) {
@@ -1213,8 +1461,8 @@ function renderResultCard(result: OutreachResult): string {
     <details open>
       <summary>Screenshots</summary>
       <div class="screenshot-grid">
-        ${renderScreenshot("Desktop", result.desktop_screenshot_path)}
-        ${renderScreenshot("Mobile", result.mobile_screenshot_path)}
+        ${renderScreenshotCard(result, "Desktop", "desktop")}
+        ${renderScreenshotCard(result, "Mobile", "mobile")}
       </div>
     </details>
 
@@ -1351,20 +1599,44 @@ function renderIssues(issues: WebsiteIssue[]): string {
     .join("");
 }
 
-function renderScreenshot(label: string, screenshotPath: string): string {
-  const src = getScreenshotSrc(screenshotPath);
+function renderScreenshotCard(result: OutreachResult, label: string, type: "desktop" | "mobile"): string {
+  const previewPath = type === "desktop" ? result.desktop_preview_screenshot_path : result.mobile_preview_screenshot_path;
+  const fullPath = type === "desktop" ? result.desktop_full_screenshot_path : result.mobile_full_screenshot_path;
+  const frameClass = type === "desktop" ? "desktop-preview-frame" : "mobile-preview-frame";
+  
+  if (!previewPath && !fullPath) {
+    return `
+      <div class="screenshot-card">
+        <div class="screenshot-header"><h3>${escapeHtml(label)} Preview</h3></div>
+        <div class="preview-container"><p class="muted">Screenshot unavailable</p></div>
+      </div>
+    `;
+  }
 
-  return `<div class="screenshot-box">
-    <div class="screenshot-title">
-      <h3>${escapeHtml(label)} Preview</h3>
-      ${src ? `<a href="${escapeAttribute(src)}" target="_blank" rel="noreferrer">Open Screenshot</a>` : ""}
+  return `
+    <div class="screenshot-card">
+      <div class="screenshot-header">
+        <h3>${escapeHtml(label)} Preview</h3>
+        <button type="button" class="tab-btn open-modal-trigger" 
+          data-type="${type}" 
+          data-preview="${escapeAttribute(previewPath)}" 
+          data-full="${escapeAttribute(fullPath)}"
+          data-business="${escapeAttribute(result.business_name)}">View Detail</button>
+      </div>
+      <div class="preview-container">
+        <div class="${frameClass}">
+          <img src="${escapeAttribute(previewPath)}" alt="${escapeAttribute(label)} preview" class="preview-img" loading="lazy">
+        </div>
+        <div class="view-btn-overlay open-modal-trigger" 
+          data-type="${type}" 
+          data-preview="${escapeAttribute(previewPath)}" 
+          data-full="${escapeAttribute(fullPath)}"
+          data-business="${escapeAttribute(result.business_name)}">
+          <button type="button">Open Viewer</button>
+        </div>
+      </div>
     </div>
-    ${
-      src
-        ? `<img src="${escapeAttribute(src)}" alt="${escapeAttribute(label)} screenshot preview">`
-        : '<div class="unavailable">Screenshot unavailable.</div>'
-    }
-  </div>`;
+  `;
 }
 
 function getScreenshotSrc(screenshotPath: string): string {

@@ -141,6 +141,10 @@ export interface ScoreBreakdown {
 export interface ScreenshotCapture {
   desktop_screenshot_path: string;
   mobile_screenshot_path: string;
+  desktop_preview_screenshot_path?: string;
+  desktop_full_screenshot_path?: string;
+  mobile_preview_screenshot_path?: string;
+  mobile_full_screenshot_path?: string;
   error?: string;
 }
 
@@ -256,6 +260,10 @@ export interface OutreachResult extends LeadRecord {
   notes: string;
   desktop_screenshot_path: string;
   mobile_screenshot_path: string;
+  desktop_preview_screenshot_path: string;
+  desktop_full_screenshot_path: string;
+  mobile_preview_screenshot_path: string;
+  mobile_full_screenshot_path: string;
   analysis_date: string;
   opt_out_status: string;
 }

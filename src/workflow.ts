@@ -279,6 +279,10 @@ export function normalizeResultRecord(record: Record<string, unknown> | Outreach
     notes: getString(record.notes, ""),
     desktop_screenshot_path: getString(record.desktop_screenshot_path, ""),
     mobile_screenshot_path: getString(record.mobile_screenshot_path, ""),
+    desktop_preview_screenshot_path: getString(record.desktop_preview_screenshot_path, getString(record.desktop_screenshot_path, "")),
+    desktop_full_screenshot_path: getString(record.desktop_full_screenshot_path, getString(record.desktop_screenshot_path, "")),
+    mobile_preview_screenshot_path: getString(record.mobile_preview_screenshot_path, getString(record.mobile_screenshot_path, "")),
+    mobile_full_screenshot_path: getString(record.mobile_full_screenshot_path, getString(record.mobile_screenshot_path, "")),
     analysis_date: analysisDate,
     opt_out_status: getString(record.opt_out_status, "Not Opted Out"),
   };
@@ -345,6 +349,10 @@ function buildOutreachResult(
     notes: "",
     desktop_screenshot_path: scan.screenshots.desktop_screenshot_path,
     mobile_screenshot_path: scan.screenshots.mobile_screenshot_path,
+    desktop_preview_screenshot_path: scan.screenshots.desktop_preview_screenshot_path || scan.screenshots.desktop_screenshot_path,
+    desktop_full_screenshot_path: scan.screenshots.desktop_full_screenshot_path || scan.screenshots.desktop_screenshot_path,
+    mobile_preview_screenshot_path: scan.screenshots.mobile_preview_screenshot_path || scan.screenshots.mobile_screenshot_path,
+    mobile_full_screenshot_path: scan.screenshots.mobile_full_screenshot_path || scan.screenshots.mobile_screenshot_path,
     analysis_date: analysisDate,
     opt_out_status: "Not Opted Out",
   });

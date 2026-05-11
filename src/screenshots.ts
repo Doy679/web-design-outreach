@@ -26,6 +26,10 @@ export async function captureScreenshots(url: string): Promise<ScreenshotCapture
   const empty = {
     desktop_screenshot_path: "",
     mobile_screenshot_path: "",
+    desktop_preview_screenshot_path: "",
+    desktop_full_screenshot_path: "",
+    mobile_preview_screenshot_path: "",
+    mobile_full_screenshot_path: "",
   };
 
   try {
@@ -37,21 +41,36 @@ export async function captureScreenshots(url: string): Promise<ScreenshotCapture
     const safeName = safeDomain(url);
     const screenshotDir = getScreenshotDir();
     const timestamp = Date.now();
-    const desktopFileName = `desktop-${safeName}-${timestamp}.png`;
-    const mobileFileName = `mobile-${safeName}-${timestamp}.png`;
-    const desktopFilePath = path.join(screenshotDir, desktopFileName);
-    const mobileFilePath = path.join(screenshotDir, mobileFileName);
-    const desktopPublicPath = `/screenshots/${desktopFileName}`;
-    const mobilePublicPath = `/screenshots/${mobileFileName}`;
+    
+    const desktopPreviewFileName = `desktop-preview-${safeName}-${timestamp}.png`;
+    const desktopFullFileName = `desktop-full-${safeName}-${timestamp}.png`;
+    const mobilePreviewFileName = `mobile-preview-${safeName}-${timestamp}.png`;
+    const mobileFullFileName = `mobile-full-${safeName}-${timestamp}.png`;
+
+    const desktopPreviewPath = path.join(screenshotDir, desktopPreviewFileName);
+    const desktopFullPath = path.join(screenshotDir, desktopFullFileName);
+    const mobilePreviewPath = path.join(screenshotDir, mobilePreviewFileName);
+    const mobileFullPath = path.join(screenshotDir, mobileFullFileName);
 
     try {
       await mkdir(screenshotDir, { recursive: true });
-      await screenshotPage(browser, url, desktopFilePath, { width: 1440, height: 1000 });
-      await screenshotPage(browser, url, mobileFilePath, { width: 390, height: 844 });
+      
+      // Desktop Preview (Above the fold)
+      await screenshotPage(browser, url, desktopPreviewPath, { width: 1440, height: 900 }, false);
+      // Desktop Full Page
+      await screenshotPage(browser, url, desktopFullPath, { width: 1440, height: 900 }, true);
+      // Mobile Preview (Above the fold)
+      await screenshotPage(browser, url, mobilePreviewPath, { width: 390, height: 844 }, false);
+      // Mobile Full Page
+      await screenshotPage(browser, url, mobileFullPath, { width: 390, height: 844 }, true);
 
       return {
-        desktop_screenshot_path: desktopPublicPath,
-        mobile_screenshot_path: mobilePublicPath,
+        desktop_screenshot_path: `/screenshots/${desktopFullFileName}`, // Fallback
+        mobile_screenshot_path: `/screenshots/${mobileFullFileName}`, // Fallback
+        desktop_preview_screenshot_path: `/screenshots/${desktopPreviewFileName}`,
+        desktop_full_screenshot_path: `/screenshots/${desktopFullFileName}`,
+        mobile_preview_screenshot_path: `/screenshots/${mobilePreviewFileName}`,
+        mobile_full_screenshot_path: `/screenshots/${mobileFullFileName}`,
       };
     } finally {
       await browser.close();
@@ -69,15 +88,23 @@ async function screenshotPage(
   url: string,
   filePath: string,
   viewport: { width: number; height: number },
+  fullPage: boolean,
 ): Promise<void> {
   const page = await browser.newPage({
     viewport,
     userAgent: "web-design-outreach/1.0 public-website-preview",
   });
 
-  await page.goto(url, { waitUntil: "domcontentloaded", timeout: screenshotTimeoutMs });
-  await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
-  await page.screenshot({ path: filePath, fullPage: true });
+  try {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: screenshotTimeoutMs });
+    await page.waitForLoadState("networkidle", { timeout: 5000 }).catch(() => undefined);
+    // Extra delay for stability and animations to settle
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    await page.screenshot({ path: filePath, fullPage });
+  } finally {
+    // page.close() is not in interface but normally exists; interface PageLike needs update if we want to be safe
+    // but browser.close() will handle it.
+  }
 }
 
 async function importPlaywright(): Promise<PlaywrightLike> {
