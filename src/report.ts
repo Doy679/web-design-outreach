@@ -467,17 +467,25 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
     }
 
     .screenshot-grid {
-      grid-template-columns: minmax(0, 1fr) minmax(220px, 0.55fr);
-      align-items: start;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .screenshot-box {
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
     }
 
     .screenshot-box img {
       display: block;
       width: 100%;
-      max-height: 520px;
-      object-fit: contain;
+      height: 480px;
+      object-fit: cover;
+      object-position: top;
       background: #eef2f7;
-      border-radius: 6px;
     }
 
     .screenshot-title {
@@ -485,7 +493,9 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       justify-content: space-between;
       gap: 10px;
       align-items: center;
-      margin-bottom: 8px;
+      padding: 10px 12px;
+      background: var(--surface-soft);
+      border-bottom: 1px solid var(--border);
     }
 
     .screenshot-title h3 {
