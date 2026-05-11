@@ -269,6 +269,12 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       color: var(--text);
     }
 
+    button.danger {
+      border-color: var(--red);
+      background: var(--red-soft);
+      color: var(--red);
+    }
+
     button:disabled {
       cursor: wait;
       opacity: 0.72;
@@ -328,6 +334,13 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       justify-content: flex-end;
       gap: 8px;
       min-width: 260px;
+    }
+
+    .remove-message {
+      min-height: 28px;
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 800;
     }
 
     .badge {
@@ -497,11 +510,36 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       padding: 18px;
     }
 
-    .notes-grid {
+    .edit-grid {
       display: grid;
-      grid-template-columns: 220px minmax(0, 1fr) auto;
-      gap: 10px;
-      align-items: end;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 10px;
+    }
+
+    .edit-grid label {
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 800;
+    }
+
+    .edit-grid .full-width {
+      grid-column: 1 / -1;
+    }
+
+    .edit-grid input[type="checkbox"] {
+      width: auto;
+      min-height: auto;
+      margin-right: 8px;
+    }
+
+    .edit-grid .checkbox-label {
+      display: flex;
+      align-items: center;
+      flex-direction: row;
+      cursor: pointer;
     }
 
     .save-message {
@@ -689,6 +727,16 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       ${cards}
     </section>
 
+    <datalist id="offerSuggestions">
+      <option value="Full redesign">
+      <option value="Mobile-first redesign">
+      <option value="Landing page">
+      <option value="Booking/contact flow improvement">
+      <option value="SEO cleanup">
+      <option value="Speed + conversion fix">
+    </datalist>
+
+    <div class="status-message" id="dashboardMessage" role="status" aria-live="polite"></div>
     <div class="empty" id="noMatches" hidden>No websites match the current filters. Clear filters to see all analyzed websites.</div>
   </main>
 
@@ -708,7 +756,9 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
     const priorityFilter = document.querySelector("#priorityFilter");
     const clearFiltersButton = document.querySelector("#clearFiltersButton");
     const printReportButton = document.querySelector("#printReportButton");
-    const cards = Array.from(document.querySelectorAll(".result-card"));
+    const resultsGrid = document.querySelector("#resultsGrid");
+    const dashboardMessage = document.querySelector("#dashboardMessage");
+    let cards = Array.from(document.querySelectorAll(".result-card"));
     const noMatches = document.querySelector("#noMatches");
     const analysisSteps = [
       "Fetching website",
@@ -888,35 +938,123 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
       applyFilters();
     }
 
-    async function saveCardReview(card) {
+    async function removeCardResult(card) {
+      if (!window.confirm("Remove this website from results?")) {
+        return;
+      }
+
+      const removeButton = card.querySelector(".remove-result");
+      const removeMessage = card.querySelector(".remove-message");
+      if (removeButton) removeButton.disabled = true;
+      if (removeMessage) removeMessage.textContent = "Removing...";
+      setStatus(dashboardMessage, "");
+
+      try {
+        const response = await fetch("/api/results/delete", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ id: card.dataset.id }),
+        });
+        const data = await response.json();
+
+        if (!response.ok || !data.success || !data.removed) {
+          throw new Error(data.error || "Unable to remove website.");
+        }
+
+        card.remove();
+        cards = cards.filter((item) => item !== card);
+
+        if (cards.length === 0) {
+          resultsGrid.innerHTML = '<div class="empty">No websites analyzed yet. Paste a URL above and click Analyze Website.</div>';
+        }
+
+        setStatus(dashboardMessage, "Website removed", "success");
+        applyFilters();
+      } catch (error) {
+        if (removeButton) removeButton.disabled = false;
+        if (removeMessage) removeMessage.textContent = error.message || "Unable to remove website.";
+        setStatus(dashboardMessage, error.message || "Unable to remove website.", "error");
+      }
+    }
+
+    async function saveCardChanges(card) {
       const saveMessage = card.querySelector(".save-message");
-      const statusSelect = card.querySelector(".review-status");
-      const notesField = card.querySelector(".notes-field");
-      saveMessage.textContent = "Saving...";
+      const id = card.dataset.id;
+      
+      const updates = {
+        business_name: card.querySelector(".edit-business-name").value.trim(),
+        industry: card.querySelector(".edit-industry").value.trim(),
+        location: card.querySelector(".edit-location").value.trim(),
+        email: card.querySelector(".edit-email").value.trim(),
+        status: card.querySelector(".edit-status").value,
+        crm_stage: card.querySelector(".edit-crm-stage").value.trim(),
+        qualified: card.querySelector(".edit-qualified").checked,
+        opt_out_status: card.querySelector(".edit-opt-out-status").value.trim(),
+        main_issue: card.querySelector(".edit-main-issue").value.trim(),
+        recommended_offer: card.querySelector(".edit-recommended-offer").value.trim(),
+        cold_email_subject: card.querySelector(".edit-cold-email-subject").value.trim(),
+        notes: card.querySelector(".edit-notes").value.trim(),
+        cold_email_body: card.querySelector(".edit-cold-email-body").value.trim(),
+        friendly_email: card.querySelector(".edit-friendly-email").value.trim(),
+        direct_email: card.querySelector(".edit-direct-email").value.trim(),
+        premium_email: card.querySelector(".edit-premium-email").value.trim(),
+      };
+
+      saveMessage.textContent = "Saving changes...";
 
       try {
         const response = await fetch("/api/results/update", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            id: card.dataset.id,
-            status: statusSelect.value,
-            notes: notesField.value,
-          }),
+          body: JSON.stringify({ id, ...updates }),
         });
         const data = await response.json();
 
         if (!response.ok || !data.success) {
-          throw new Error(data.error || "Unable to save review.");
+          throw new Error(data.error || "Unable to save changes.");
         }
 
-        card.dataset.status = statusSelect.value.toLowerCase();
+        saveMessage.textContent = "Changes saved";
+        
+        // Update dashboard state (simple approach: reload or surgical DOM update)
+        // For a demo, surgical DOM update of labels/badges is better
+        card.dataset.status = updates.status.toLowerCase();
         const statusBadge = card.querySelector(".status-badge");
-        if (statusBadge) statusBadge.textContent = statusSelect.value;
-        saveMessage.textContent = "Saved";
+        if (statusBadge) statusBadge.textContent = updates.status;
+        
+        const qBadge = card.querySelector(".badge[class*='qualified']");
+        if (qBadge) {
+          qBadge.textContent = updates.qualified ? "Qualified" : "Not Qualified";
+          qBadge.className = "badge " + (updates.qualified ? "low" : "medium");
+        }
+
+        const h2 = card.querySelector("h2");
+        if (h2) h2.textContent = updates.business_name || "Unknown Website";
+
+        // Update search text
+        const searchText = [
+          updates.business_name,
+          card.querySelector("a[href]")?.href || "",
+          updates.industry,
+          updates.location,
+          updates.status,
+          updates.main_issue,
+        ].join(" ").toLowerCase();
+        card.dataset.search = searchText;
+
+        setTimeout(() => {
+          saveMessage.textContent = "";
+          card.querySelector("details:has(.edit-grid)").open = false;
+        }, 1500);
+
       } catch (error) {
-        saveMessage.textContent = error.message || "Unable to save review. Make sure npm run preview is running.";
+        saveMessage.textContent = error.message || "Unable to save changes.";
       }
+    }
+
+    function cancelCardEdit(card) {
+      card.querySelector("details:has(.edit-grid)").open = false;
+      card.querySelector(".save-message").textContent = "";
     }
 
     async function copyText(text, button) {
@@ -942,8 +1080,12 @@ function buildHtml(results: OutreachResult[], stats: DashboardStats): string {
         clearFilters();
       } else if (button.matches("#printReportButton")) {
         window.print();
-      } else if (button.matches(".save-review")) {
-        saveCardReview(button.closest(".result-card"));
+      } else if (button.matches(".save-changes")) {
+        saveCardChanges(button.closest(".result-card"));
+      } else if (button.matches(".cancel-edit")) {
+        cancelCardEdit(button.closest(".result-card"));
+      } else if (button.matches(".remove-result")) {
+        removeCardResult(button.closest(".result-card"));
       } else if (button.matches(".copy-email")) {
         const target = document.getElementById(button.dataset.copyTarget);
         copyText(target ? target.textContent.trim() : "", button);
@@ -1007,6 +1149,8 @@ function renderResultCard(result: OutreachResult): string {
       <span class="badge status-badge">${escapeHtml(result.status)}</span>
       <span class="badge">${escapeHtml(formatLabel(result.analysis_status))}</span>
       <span class="badge ${result.qualified ? "low" : "medium"}">${result.qualified ? "Qualified" : "Not Qualified"}</span>
+      <button type="button" class="danger remove-result">Remove</button>
+      <span class="remove-message" aria-live="polite"></span>
     </div>
   </div>
 
@@ -1076,20 +1220,79 @@ function renderResultCard(result: OutreachResult): string {
       <p class="plain-text"><strong>Overall copy review:</strong> ${escapeHtml(result.outreach_copy_review || "Review manually before sending.")}</p>
     </details>
 
-    <details open>
-      <summary>Review Notes</summary>
-      <div class="notes-grid">
+    <details>
+      <summary>Edit Details</summary>
+      <div class="edit-grid">
+        <label>
+          Business Name
+          <input type="text" class="edit-business-name" value="${escapeAttribute(result.business_name)}">
+        </label>
+        <label>
+          Industry
+          <input type="text" class="edit-industry" value="${escapeAttribute(result.industry)}">
+        </label>
+        <label>
+          Location
+          <input type="text" class="edit-location" value="${escapeAttribute(result.location)}">
+        </label>
+        <label>
+          Email
+          <input type="email" class="edit-email" value="${escapeAttribute(result.email)}">
+        </label>
         <label>
           Status
-          <select class="review-status">
+          <select class="edit-status">
             ${renderReviewStatusOptions(result.status)}
           </select>
         </label>
         <label>
-          Notes
-          <textarea class="notes-field" placeholder="Add review notes">${escapeHtml(result.notes)}</textarea>
+          CRM Stage
+          <input type="text" class="edit-crm-stage" value="${escapeAttribute(result.crm_stage)}">
         </label>
-        <button type="button" class="save-review">Save</button>
+        <label class="checkbox-label">
+          <input type="checkbox" class="edit-qualified" ${result.qualified ? "checked" : ""}>
+          Qualified Outreach Prospect
+        </label>
+        <label>
+          Opt-out Status
+          <input type="text" class="edit-opt-out-status" value="${escapeAttribute(result.opt_out_status)}">
+        </label>
+        <label class="full-width">
+          Main Issue
+          <input type="text" class="edit-main-issue" value="${escapeAttribute(result.main_issue)}">
+        </label>
+        <label class="full-width">
+          Recommended Offer
+          <input type="text" class="edit-recommended-offer" value="${escapeAttribute(result.recommended_offer)}" list="offerSuggestions">
+        </label>
+        <label class="full-width">
+          Cold Email Subject
+          <input type="text" class="edit-cold-email-subject" value="${escapeAttribute(result.cold_email_subject)}">
+        </label>
+        <label class="full-width">
+          Notes
+          <textarea class="edit-notes" placeholder="Add review notes">${escapeHtml(result.notes)}</textarea>
+        </label>
+        <label class="full-width">
+          Cold Email Body
+          <textarea class="edit-cold-email-body">${escapeHtml(result.cold_email_body)}</textarea>
+        </label>
+        <label class="full-width">
+          Friendly Email
+          <textarea class="edit-friendly-email">${escapeHtml(result.friendly_email)}</textarea>
+        </label>
+        <label class="full-width">
+          Direct Email
+          <textarea class="edit-direct-email">${escapeHtml(result.direct_email)}</textarea>
+        </label>
+        <label class="full-width">
+          Premium Email
+          <textarea class="edit-premium-email">${escapeHtml(result.premium_email)}</textarea>
+        </label>
+        <div class="button-row full-width">
+          <button type="button" class="save-changes">Save Changes</button>
+          <button type="button" class="secondary cancel-edit">Cancel</button>
+        </div>
         <div class="save-message" aria-live="polite"></div>
       </div>
     </details>

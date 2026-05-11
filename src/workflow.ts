@@ -81,9 +81,21 @@ export async function readResultsFile(filePath = defaultJsonOutputPath): Promise
 
     if (!Array.isArray(parsed)) return [];
 
-    return parsed
-      .filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item))
+    const rawRecords = parsed
+      .filter((item): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item));
+    const hadMissingIds = rawRecords.some((item) => !getString(item.id, ""));
+    const results = rawRecords
       .map(normalizeResultRecord);
+
+    if (hadMissingIds) {
+      await writeJsonResults(filePath, results);
+
+      if (filePath === defaultJsonOutputPath) {
+        await writeCsvResults(defaultCsvOutputPath, results);
+      }
+    }
+
+    return results;
   } catch {
     return [];
   }
@@ -111,7 +123,7 @@ export async function appendResult(
 
 export async function updateResult(
   match: { id?: string; website_url?: string },
-  updates: Partial<Pick<OutreachResult, "status" | "notes">>,
+  updates: Partial<OutreachResult>,
   jsonOutputPath = defaultJsonOutputPath,
   csvOutputPath = defaultCsvOutputPath,
 ): Promise<OutreachResult[]> {
@@ -122,19 +134,41 @@ export async function updateResult(
 
     if (!matches) return result;
 
-    return normalizeResultRecord({
-      ...result,
-      status: updates.status ? normalizeReviewStatus(updates.status) : result.status,
-      notes: typeof updates.notes === "string" ? updates.notes : result.notes,
-    });
+    const merged = { ...result, ...updates };
+
+    if (updates.status && !isReviewStatus(updates.status)) {
+      merged.status = result.status;
+    }
+
+    return normalizeResultRecord(merged);
   });
 
   await saveResults(updated, jsonOutputPath, csvOutputPath);
   return updated;
 }
 
-export function getResultId(result: Pick<OutreachResult, "website_url" | "analysis_date">): string {
-  return encodeURIComponent(`${result.website_url}|${result.analysis_date}`);
+function isReviewStatus(value: string): value is ReviewStatus {
+  return reviewStatuses.includes(value as ReviewStatus);
+}
+
+export async function deleteResult(
+  id: string,
+  jsonOutputPath = defaultJsonOutputPath,
+  csvOutputPath = defaultCsvOutputPath,
+): Promise<{ results: OutreachResult[]; removed: boolean }> {
+  const results = await readResultsFile(jsonOutputPath);
+  const updated = results.filter((result) => getResultId(result) !== id);
+  const removed = updated.length !== results.length;
+
+  if (removed) {
+    await saveResults(updated, jsonOutputPath, csvOutputPath);
+  }
+
+  return { results: updated, removed };
+}
+
+export function getResultId(result: Pick<OutreachResult, "id" | "website_url" | "analysis_date">): string {
+  return result.id || createResultId(result.website_url, result.analysis_date);
 }
 
 export function summarizeResults(results: OutreachResult[]): SummaryCounts {
@@ -193,8 +227,10 @@ export function normalizeResultRecord(record: Record<string, unknown> | Outreach
   const qualified = getBoolean(record.qualified, false);
   const crmStage = getString(record.crm_stage, getCrmStageFromStatuses(analysisStatus, qualified));
   const status = normalizeReviewStatus(record.status, crmStage, qualified);
+  const analysisDate = getString(record.analysis_date, new Date().toISOString());
 
   return {
+    id: getString(record.id, createResultId(getString(record.website_url, ""), analysisDate)),
     business_name: getString(record.business_name, "Unknown Website"),
     website_url: getString(record.website_url, ""),
     industry: getString(record.industry, ""),
@@ -243,7 +279,7 @@ export function normalizeResultRecord(record: Record<string, unknown> | Outreach
     notes: getString(record.notes, ""),
     desktop_screenshot_path: getString(record.desktop_screenshot_path, ""),
     mobile_screenshot_path: getString(record.mobile_screenshot_path, ""),
-    analysis_date: getString(record.analysis_date, new Date().toISOString().slice(0, 10)),
+    analysis_date: analysisDate,
     opt_out_status: getString(record.opt_out_status, "Not Opted Out"),
   };
 }
@@ -257,8 +293,10 @@ function buildOutreachResult(
   const crmStage = getCrmStageFromStatuses(scan.status, qualification.qualified);
   const reviewStatus = qualification.qualified ? "Needs Review" : scan.status === "analyzed" ? "Not Qualified" : "Needs Manual Review";
   const businessName = scan.businessIdentity.name || aiFields.business_name || lead.business_name;
+  const analysisDate = new Date().toISOString();
 
   return normalizeResultRecord({
+    id: createResultId(scan.finalUrl || scan.normalizedUrl || lead.website_url, analysisDate),
     business_name: businessName,
     website_url: scan.finalUrl || scan.normalizedUrl || lead.website_url,
     industry: scan.businessIdentity.industry || aiFields.industry || lead.industry,
@@ -307,7 +345,7 @@ function buildOutreachResult(
     notes: "",
     desktop_screenshot_path: scan.screenshots.desktop_screenshot_path,
     mobile_screenshot_path: scan.screenshots.mobile_screenshot_path,
-    analysis_date: new Date().toISOString().slice(0, 10),
+    analysis_date: analysisDate,
     opt_out_status: "Not Opted Out",
   });
 }
@@ -493,4 +531,41 @@ function getStringArray(value: unknown, fallback: string[]): string[] {
   if (Array.isArray(value)) return value.map((item) => String(item).trim()).filter(Boolean);
   if (typeof value === "string" && value.trim()) return value.split(/;|\n/).map((item) => item.trim()).filter(Boolean);
   return fallback;
+}
+
+function createResultId(websiteUrl: string, analysisDate: string): string {
+  const domain = safeIdDomain(websiteUrl);
+  const timestamp = compactTimestamp(analysisDate || new Date().toISOString());
+  const random = Math.random().toString(16).slice(2, 6) || "0000";
+
+  return `${domain}-${timestamp}-${random}`;
+}
+
+function safeIdDomain(websiteUrl: string): string {
+  try {
+    const candidate = /^https?:\/\//i.test(websiteUrl) ? websiteUrl : `https://${websiteUrl}`;
+    return new URL(candidate).hostname
+      .replace(/^www\./i, "")
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-|-$/g, "")
+      .toLowerCase() || "website";
+  } catch {
+    return "website";
+  }
+}
+
+function compactTimestamp(value: string): string {
+  const date = new Date(value);
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const pad = (numberValue: number): string => String(numberValue).padStart(2, "0");
+
+  return [
+    safeDate.getFullYear(),
+    pad(safeDate.getMonth() + 1),
+    pad(safeDate.getDate()),
+    "-",
+    pad(safeDate.getHours()),
+    pad(safeDate.getMinutes()),
+    pad(safeDate.getSeconds()),
+  ].join("");
 }

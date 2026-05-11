@@ -212,6 +212,7 @@ export interface EmailCopyReview {
 }
 
 export interface OutreachResult extends LeadRecord {
+  id: string;
   status: ReviewStatus;
   analysis_status: WebsiteStatus;
   detected_builder: string;

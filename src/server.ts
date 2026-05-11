@@ -11,6 +11,7 @@ import {
   appendResult,
   defaultCsvOutputPath,
   defaultJsonOutputPath,
+  deleteResult,
   isFullHttpUrl,
   makeLeadFromInput,
   readResultsFile,
@@ -86,9 +87,20 @@ export async function handleRequest(request: IncomingMessage, response: ServerRe
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/api/results/delete") {
+      await handleDeleteResult(request, response);
+      return;
+    }
+
     if (request.method === "PATCH" && url.pathname.startsWith("/api/results/")) {
       const id = decodeURIComponent(url.pathname.replace("/api/results/", ""));
       await handleUpdateResult(request, response, id);
+      return;
+    }
+
+    if (request.method === "DELETE" && url.pathname.startsWith("/api/results/")) {
+      const id = decodeURIComponent(url.pathname.replace("/api/results/", ""));
+      await handleDeleteResult(request, response, id);
       return;
     }
 
@@ -189,24 +201,71 @@ async function handleUpdateResult(
   const body = await readJsonBody(request);
   const id = routeId || getOptionalString(body.id);
   const websiteUrl = getOptionalString(body.website_url);
-  const status = getOptionalString(body.status);
-  const notes = typeof body.notes === "string" ? body.notes : undefined;
 
   if (!id && !websiteUrl) {
     sendJson(response, 400, { success: false, error: "Missing result id or website_url." });
     return;
   }
 
-  const results = await updateResult(
-    { id, website_url: websiteUrl },
-    { status: isReviewStatus(status) ? status : undefined, notes },
-    defaultJsonOutputPath,
-    defaultCsvOutputPath,
-  );
+  // Sanitize updates: only allow fields that are meant to be editable
+  const updates: any = {};
+  const editableFields = [
+    "business_name",
+    "industry",
+    "location",
+    "email",
+    "status",
+    "notes",
+    "main_issue",
+    "recommended_offer",
+    "qualified",
+    "crm_stage",
+    "opt_out_status",
+    "cold_email_subject",
+    "cold_email_body",
+    "friendly_email",
+    "direct_email",
+    "premium_email",
+  ];
+
+  for (const field of editableFields) {
+    if (field in body) {
+      updates[field] = body[field];
+    }
+  }
+
+  const results = await updateResult({ id, website_url: websiteUrl }, updates, defaultJsonOutputPath, defaultCsvOutputPath);
   await generateHtmlReport(defaultJsonOutputPath);
 
   sendJson(response, 200, {
     success: true,
+    results,
+    summary: summarizeResults(results),
+  });
+}
+
+async function handleDeleteResult(
+  request: IncomingMessage,
+  response: ServerResponse,
+  routeId = "",
+): Promise<void> {
+  const body = routeId ? {} : await readJsonBody(request);
+  const id = routeId || getOptionalString(body.id);
+
+  if (!id) {
+    sendJson(response, 400, { success: false, error: "Missing result id." });
+    return;
+  }
+
+  const { results, removed } = await deleteResult(id, defaultJsonOutputPath, defaultCsvOutputPath);
+
+  if (removed) {
+    await generateHtmlReport(defaultJsonOutputPath);
+  }
+
+  sendJson(response, 200, {
+    success: true,
+    removed,
     results,
     summary: summarizeResults(results),
   });

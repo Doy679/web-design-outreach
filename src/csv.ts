@@ -5,6 +5,7 @@ import { stringify } from "csv-stringify/sync";
 import type { LeadRecord, OutreachResult } from "./types.js";
 
 const csvColumns = [
+  "id",
   "business_name",
   "website_url",
   "industry",
